@@ -49,7 +49,10 @@ npm run preview      # serve the production build on :4173
 ## Invariants — please don't break these
 
 1. **Procedural art only.** No sprite sheets or image assets. Draw with
-   `Graphics`/`draw.ts`. The only binary assets are the music and the font.
+   `Graphics`/`draw.ts`. The only binary assets are the music, the font and
+   the favicon PNGs (`public/favicon-32.png`, `public/apple-touch-icon.png`),
+   which are renders of `public/favicon.svg` for Safari, which ignores SVG
+   favicons. Re-render them if the SVG changes.
 2. **Movement uses the tile+progress model** (`Mover`): an actor sits between the
    centre of tile `(tx,ty)` and `(tx,ty)+dir` at progress `t ∈ [0,1]`, and the
    pixel position is a pure function of those. This is what makes turning exact
