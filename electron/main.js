@@ -2,7 +2,7 @@
 // from dist/ over a privileged custom scheme rather than file://, so fetch,
 // media streaming and localStorage behave exactly as they do on the web.
 import { app, BrowserWindow, ipcMain, Menu, net, protocol, shell } from 'electron';
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -62,12 +62,21 @@ if (process.platform === 'linux' && !app.commandLine.hasSwitch('ozone-platform')
   app.commandLine.appendSwitch('ozone-platform', 'x11');
 }
 
-// Linux GPU: take the most travelled path — ANGLE over OpenGL, no Vulkan.
-// Under gamescope, GPU start-up probing can hang before the first frame,
-// which leaves Steam's launch spinner turning and the game unkillable.
-if (process.platform === 'linux') {
-  if (!app.commandLine.hasSwitch('use-angle')) app.commandLine.appendSwitch('use-angle', 'gl');
-  if (!app.commandLine.hasSwitch('disable-features')) app.commandLine.appendSwitch('disable-features', 'Vulkan');
+// SteamOS: WebGL through ANGLE's Vulkan backend (RADV). Its default OpenGL
+// backend drops part of the final full-screen pass on the Deck, leaving a
+// black triangle in the lower right. Other Linux keeps Chromium's default;
+// `--use-angle=…` on the command line overrides either way.
+function isSteamOS() {
+  try {
+    return /^ID=steamos$/m.test(readFileSync('/etc/os-release', 'utf8'));
+  } catch {
+    return false;
+  }
+}
+if (process.platform === 'linux' && isSteamOS() && !app.commandLine.hasSwitch('use-angle')) {
+  app.commandLine.appendSwitch('use-angle', 'vulkan');
+  app.commandLine.appendSwitch('enable-features', 'Vulkan,VulkanFromANGLE,DefaultANGLEVulkan');
+  log('SteamOS: ANGLE on Vulkan');
 }
 
 // One game at a time: a second launch focuses the running window.

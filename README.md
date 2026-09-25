@@ -70,8 +70,8 @@ If the buttons act like a keyboard, open the game's controller settings and
 pick the **Gamepad** layout. To leave, use **QUIT GAME** on the pause screen
 or the Steam button → *Exit game*.
 
-If it won't start, each launch writes `ghost-man.log` and `chromium.log`
-to `~/.config/Ghost-Man/`. Attach them to an
+If it won't start, each launch writes `launch.log`, `ghost-man.log` and
+`chromium.log` to `~/.config/Ghost-Man/`. Attach them to an
 [issue](https://github.com/vittau/ghost-man/issues).
 
 ## <img src="docs/readme/h-controls.svg" alt="Controls" width="100%">

@@ -35,7 +35,12 @@ linux:
     - target: dir
       arch: [x64]
   category: Game
-  executableName: ghost-man
+  # The binary is ghost-man-bin; `ghost-man` is the launcher script that
+  # cleans up Steam's environment first (build/linux/ghost-man).
+  executableName: ghost-man-bin
+  extraFiles:
+    - from: build/linux/ghost-man
+      to: ghost-man
   syncDesktopName: true
   synopsis: Arcade game where you are the ghost
 

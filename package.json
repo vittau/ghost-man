@@ -27,5 +27,6 @@
   "engines": {
     "node": ">=24"
   },
-  "desktopName": "ghost-man.desktop"
+  "desktopName": "ghost-man.desktop",
+  "productName": "Ghost-Man"
 }
