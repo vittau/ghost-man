@@ -33,16 +33,17 @@ npm run preview      # serve the production build on :4173
 | `src/maze.ts` | Tile grid, pellet layer, BFS distance fields (`NavCache`) |
 | `src/mover.ts` | Grid-locked, drift-free movement |
 | `src/actors.ts` | Pac-Man + ghost simulation and AI |
-| `src/draw.ts` | Procedural vector art (Pac-Man, ghosts, door) |
+| `src/draw.ts` | Procedural vector art (Pac-Man, ghosts, silhouettes, sparkles, door) |
 | `src/crt-filter.ts` | Custom `crt-geom`/Blargg-style CRT filter |
 | `src/filters.ts` | Bloom + CRT construction (with fallback) |
-| `src/fx.ts` | Particles, popups, screen shake, flash, hit-stop |
+| `src/fx.ts` | Particle streaks, shockwave rings, popups, shake, flash, hit-stop |
 | `src/audio.ts` | Procedural WebAudio SFX (no files) |
 | `src/music.ts` | Bundled MP3 playback, pre-buffering, ducking |
 | `src/hud.ts` | Right-hand panel (score, squad orders, ability, lives) |
-| `src/menu.ts` | Attract screen: synthwave backdrop + ghost select |
+| `src/menu.ts` | Attract screen: sunset, wireframe terrain + mountains, ghost select |
 | `src/input.ts` | Keyboard state + edge detection |
 | `src/color.ts` | Colour blending helpers |
+| `src/noise.ts` | Value noise (wall texture, menu terrain) |
 | `src/style.css` | Page shell, bundled font, full-bleed canvas |
 
 ## Invariants — please don't break these
@@ -61,10 +62,17 @@ npm run preview      # serve the production build on :4173
    with no letterbox and no stretching. After changing the viewport you must
    call `hud.layout()`, `menu.layout()` and `fx.resize(...)`. **Never capture
    `SCREEN_W`/`HUD_W`/`VIEW_W` in module-scope constants** — they change on
-   resize. Keep positions in `layout()` methods.
+   resize. Keep positions in `layout()` methods. Always follow a
+   `renderer.resize()` with `game.layout()`: it also clears stale filter-stack
+   textures (`clearStaleFilterTextures`), working around a Pixi 8.21 bug where
+   a resize destroys a texture the next frame still reads — the throw stops
+   Pixi's ticker for good and the game freezes.
 5. **The CRT filter must receive the render-target size** (`renderer.width` /
    `renderer.height`), not the CSS size. Feeding it the displayed size breaks
-   its aspect correction and skews the curvature.
+   its aspect correction and skews the curvature. The shader also normalises
+   `vTextureCoord` by `uOutputFrame.zw * uInputSize.zw`: Pixi's pooled filter
+   texture can be larger than the frame, and centring on raw coordinates
+   skews the warp.
 6. **The attract-mode demo runs the real simulation** but must never mutate the
    score or the persisted high score. See the `demo` flag in `eatGhost()`.
 7. **The player's ability is only usable in state `'normal'`.** It is locked
@@ -87,6 +95,12 @@ npm run preview      # serve the production build on :4173
 
 ## Conventions
 
+- **Text is sized for a 7" 1280x800 handheld (Steam Deck).** Nothing below
+  10px in `Press Start 2P`; check new HUD/menu text at that resolution (the
+  HUD panel is at its 350px minimum there).
+- Most art is redrawn every frame into `Graphics`. Cache anything that owns a
+  GPU resource — `FillGradient`s are built once per colour (`bodyGradient()`
+  in `draw.ts`), never per frame.
 - Speeds are expressed in **tiles per second** (`SPEED` in `config.ts`); multiply
   by `TILE` for pixels.
 - Colours come from `PALETTE` / `SKY` in `config.ts`. Keep the vaporwave
@@ -105,7 +119,11 @@ For visual checks, run the dev server and drive a headless browser over the
 Chrome DevTools Protocol (a small script that connects to
 `--remote-debugging-port`, dispatches key events and captures a screenshot works
 well). WebGL must be available; the renderer is pinned to `preference: 'webgl'`
-because the CRT filter is GLSL-only.
+because the CRT filter is GLSL-only. Also test with
+`Emulation.setDeviceMetricsOverride({ deviceScaleFactor: 2 })`: a fractional
+render resolution is what exposes filter-texture sizing bugs (skewed CRT,
+resize freezes), and it's slow enough headless to trigger the adaptive
+low-quality downgrade in `main.ts`.
 
 ## Deploying
 

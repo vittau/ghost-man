@@ -14,6 +14,16 @@ interface Particle {
   grav: number;
 }
 
+interface Ring {
+  x: number;
+  y: number;
+  color: number;
+  life: number;
+  max: number;
+  radius: number;
+  width: number;
+}
+
 interface Popup {
   text: Text;
   vy: number;
@@ -23,6 +33,7 @@ interface Popup {
 
 const MAX_PARTICLES = 420;
 const MAX_POPUPS = 24;
+const MAX_RINGS = 16;
 
 /**
  * Juice: particles, floating score popups, screen shake, full-screen flashes
@@ -35,6 +46,7 @@ export class Fx {
   private readonly g = new Graphics();
   private readonly textLayer = new Container();
   private parts: Particle[] = [];
+  private rings: Ring[] = [];
   private popups: Popup[] = [];
   private pool: Text[] = [];
 
@@ -97,6 +109,12 @@ export class Fx {
         grav,
       });
     }
+  }
+
+  /** Expanding neon shockwave ring. */
+  ring(x: number, y: number, color: number, radius = 60, dur = 0.5, width = 3): void {
+    if (this.rings.length >= MAX_RINGS) this.rings.shift();
+    this.rings.push({ x, y, color, life: dur, max: dur, radius, width });
   }
 
   pop(text: string, x: number, y: number, color = PALETTE.text, size = 12): void {
@@ -186,8 +204,33 @@ export class Fx {
       p.x += p.vx * sdt;
       p.y += p.vy * sdt;
       const a = p.life / p.max;
-      this.g.circle(p.x, p.y, p.size * (0.4 + a * 0.6));
-      this.g.fill({ color: p.color, alpha: a });
+      const s = p.size * (0.4 + a * 0.6);
+      const sp = Math.hypot(p.vx, p.vy);
+      if (sp > 60) {
+        // Fast sparks read as streaks along their velocity, like a long exposure.
+        const k = Math.min(0.05, 14 / sp);
+        this.g.moveTo(p.x, p.y).lineTo(p.x - p.vx * k, p.y - p.vy * k);
+        this.g.stroke({ width: s, color: p.color, alpha: a, cap: 'round' });
+      } else {
+        this.g.circle(p.x, p.y, s);
+        this.g.fill({ color: p.color, alpha: a });
+      }
+    }
+
+    // Shockwave rings: ease-out growth, a bright leading edge and a soft echo.
+    for (let i = this.rings.length - 1; i >= 0; i--) {
+      const r = this.rings[i];
+      r.life -= sdt;
+      if (r.life <= 0) {
+        this.rings.splice(i, 1);
+        continue;
+      }
+      const k = 1 - r.life / r.max;
+      const e = 1 - Math.pow(1 - k, 3);
+      const rad = r.radius * (0.15 + 0.85 * e);
+      const a = 1 - k;
+      this.g.circle(r.x, r.y, rad).stroke({ width: r.width * (0.4 + a), color: r.color, alpha: a * 0.9 });
+      this.g.circle(r.x, r.y, rad * 0.8).stroke({ width: r.width * 0.5, color: r.color, alpha: a * 0.3 });
     }
 
     // Popups.
@@ -218,6 +261,7 @@ export class Fx {
 
   clear(): void {
     this.parts.length = 0;
+    this.rings.length = 0;
     this.g.clear();
     for (const p of this.popups) this.recycle(p);
     this.popups.length = 0;

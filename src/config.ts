@@ -34,7 +34,7 @@ export let CAM_MAX = 0;
  */
 export function setViewportWidth(width: number): void {
   SCREEN_W = Math.max(1040, Math.round(width));
-  HUD_W = Math.max(300, Math.min(460, Math.round(SCREEN_W * 0.22)));
+  HUD_W = Math.max(350, Math.min(480, Math.round(SCREEN_W * 0.26)));
   VIEW_W = SCREEN_W - HUD_W;
   MAZE_ZOOM = Math.min(2.2, VIEW_W / WORLD_W);
   MAZE_OFFSET_X = (VIEW_W - WORLD_W * MAZE_ZOOM) / 2;

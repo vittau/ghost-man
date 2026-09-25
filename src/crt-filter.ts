@@ -22,6 +22,16 @@ out vec4 finalColor;
 
 uniform sampler2D uTexture;
 
+// Pixi's filter globals. The pooled input texture can be larger than the
+// frame (on a fractional devicePixelRatio the frame rounds 1px past the screen
+// and falls back to a power-of-two texture), so vTextureCoord only spans
+// [0, uOutputFrame.zw * uInputSize.zw] — not [0, 1]. Everything below works in
+// normalised screen space and converts back when sampling; centring the warp
+// on raw vTextureCoord skews the curvature off to one side.
+uniform highp vec4 uInputSize;
+uniform highp vec4 uOutputFrame;
+uniform vec4 uInputClamp;
+
 uniform vec2 uResolution;
 uniform float uTime;
 uniform float uCurvature;
@@ -50,8 +60,15 @@ float hash(vec2 p) {
   return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453123);
 }
 
+vec3 sampleScreen(vec2 screenUv, vec2 uvScale) {
+  vec2 t = clamp(screenUv * uvScale, uInputClamp.xy, uInputClamp.zw);
+  return texture(uTexture, t).rgb;
+}
+
 void main(void) {
-  vec2 uv = warp(vTextureCoord);
+  vec2 uvScale = uOutputFrame.zw * uInputSize.zw;
+  vec2 screen = vTextureCoord / max(uvScale, vec2(1e-6));
+  vec2 uv = warp(screen);
 
   // Clamp rather than black out: the image runs cleanly to every edge with no
   // bezel or dark margin. Against the dark maze border the smear is invisible.
@@ -61,9 +78,9 @@ void main(void) {
 
   // Blargg-ish NTSC colour bleed: sample the channels slightly apart.
   vec3 col;
-  col.r = texture(uTexture, uv + vec2(px.x * uBleed, 0.0)).r;
-  col.g = texture(uTexture, uv).g;
-  col.b = texture(uTexture, uv - vec2(px.x * uBleed, 0.0)).b;
+  col.r = sampleScreen(uv + vec2(px.x * uBleed, 0.0), uvScale).r;
+  col.g = sampleScreen(uv, uvScale).g;
+  col.b = sampleScreen(uv - vec2(px.x * uBleed, 0.0), uvScale).b;
 
   // Scanlines.
   float scan = 0.5 + 0.5 * sin(uv.y * uResolution.y * PI);
@@ -80,7 +97,7 @@ void main(void) {
   // Gentle radial vignette that fades all the way to the screen edges and
   // never reaches black, so there is no abrupt band before the sides.
   if (uVignette > 0.001) {
-    float d = distance(vTextureCoord, vec2(0.5)) * 1.41421356;
+    float d = distance(screen, vec2(0.5)) * 1.41421356;
     col *= 1.0 - uVignette * smoothstep(0.55, 1.0, d);
   }
 

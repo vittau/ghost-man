@@ -19,6 +19,7 @@ import {
   SCREEN_W,
   STANCE_ORDER,
   TILE,
+  TUNNEL_ROW,
   VIEW_W,
   WORLD_H,
   WORLD_W,
@@ -28,7 +29,7 @@ import { Maze, NavCache, WALL } from './maze';
 import { centerOf } from './mover';
 import { Ghost, Pacman } from './actors';
 import type { SimContext, SimFields } from './actors';
-import { drawDoor, drawGhost, drawPacman } from './draw';
+import { drawDoor, drawGhost, drawGhostSilhouette, drawPacman, drawSparkle } from './draw';
 import { Fx } from './fx';
 import { GameAudio } from './audio';
 import { Hud } from './hud';
@@ -40,6 +41,7 @@ import { DIRS } from './types';
 import type { Dir, GamePhase, GhostId, Stance, TilePos, UnitDir } from './types';
 import type { Input } from './input';
 import { MusicPlayer } from './music';
+import { lattice, valueNoise } from './noise';
 
 // Bundled music (CC-BY 4.0 — see README for attribution).
 import menuTrack from './assets/audio/01-falling-organ.mp3';
@@ -68,30 +70,6 @@ const angleLerp = (a: number, b: number, t: number): number => {
   let diff = ((b - a + Math.PI) % (Math.PI * 2)) - Math.PI;
   if (diff < -Math.PI) diff += Math.PI * 2;
   return a + diff * t;
-};
-
-// Cheap value noise. Sampling it in tile-space with a slowly advancing offset
-// gives smoothly correlated, drifting variation — neighbours rise and fall
-// together, which reads as organic rather than blinking.
-const fade = (t: number): number => t * t * (3 - 2 * t);
-
-const lattice = (ix: number, iy: number, seed: number): number => {
-  const s = Math.sin(ix * 127.1 + iy * 311.7 + seed * 74.7) * 43758.5453;
-  return s - Math.floor(s);
-};
-
-const valueNoise = (x: number, y: number, seed: number): number => {
-  const ix = Math.floor(x);
-  const iy = Math.floor(y);
-  const fx = fade(x - ix);
-  const fy = fade(y - iy);
-  const a = lattice(ix, iy, seed);
-  const b = lattice(ix + 1, iy, seed);
-  const c = lattice(ix, iy + 1, seed);
-  const d = lattice(ix + 1, iy + 1, seed);
-  const top = a + (b - a) * fx;
-  const bot = c + (d - c) * fx;
-  return top + (bot - top) * fy;
 };
 
 export class Game {
@@ -152,12 +130,17 @@ export class Game {
   // Presentation.
   private readonly world = new Container();
   private readonly backdrop = new Graphics();
+  private readonly floorGrid = new Graphics();
+  private readonly floorGlow = new Graphics();
   private readonly mazeFill = new Graphics();
   private readonly mazeGfx = new Graphics();
   private readonly wallDots = new Graphics();
   private readonly dotGfx = new Graphics();
+  private readonly sparkleGfx = new Graphics();
   private readonly powerGfx = new Graphics();
   private readonly doorGfx = new Graphics();
+  private readonly portalGfx = new Graphics();
+  private readonly trailGfx = new Graphics();
   private readonly actorLayer = new Container();
   private readonly overlayGfx = new Graphics();
   private readonly intentGfx = new Graphics();
@@ -165,6 +148,8 @@ export class Game {
   private readonly decoyView = new Graphics();
   private readonly playerRing = new Graphics();
   private readonly ghostViews = new Map<GhostId, Graphics>();
+  /** Recent on-screen positions per actor, newest last, for motion trails. */
+  private readonly trails = new Map<string, Array<{ x: number; y: number }>>();
   private bloom = createBloom();
   private crt: CrtResult | null = null;
   private crtOn = true;
@@ -194,12 +179,17 @@ export class Game {
       this.actorLayer.addChild(view);
     }
 
+    this.actorLayer.addChildAt(this.trailGfx, 0);
     this.actorLayer.addChild(this.playerRing, this.intentGfx, this.pacView, this.decoyView);
     this.world.addChild(
+      this.floorGrid,
+      this.floorGlow,
       this.mazeFill,
       this.wallDots,
       this.mazeGfx,
+      this.portalGfx,
       this.dotGfx,
+      this.sparkleGfx,
       this.powerGfx,
       this.doorGfx,
       this.actorLayer,
@@ -227,6 +217,9 @@ export class Game {
     try {
       this.crt = createCRT();
       app.stage.filters = [this.crt.filter];
+      // Pin the pass to the full screen so the warp centre never depends on the
+      // stage's content bounds.
+      app.stage.filterArea = app.screen;
       this.crt.resize(app.renderer.width, app.renderer.height);
     } catch (err) {
       console.warn('[ghost-man] CRT unavailable', err);
@@ -248,13 +241,71 @@ export class Game {
     this.playerGhost = this.ghosts.find((g) => g.id === this.playerId) as Ghost;
   }
 
-  private buildMaze(): void {
-    const inset = 2;
-    const isWall = (c: number, r: number): boolean => {
-      if (c < 0 || c >= COLS || r < 0 || r >= ROWS) return false;
-      return this.maze.kindAt(c, r) === WALL;
+  private isWallTile(c: number, r: number): boolean {
+    if (c < 0 || c >= COLS || r < 0 || r >= ROWS) return false;
+    return this.maze.kindAt(c, r) === WALL;
+  }
+
+  /**
+   * Corner-aware wall outline at a given inset, grouped by row so each row can
+   * carry its own gradient colour. Returns [x1, y1, x2, y2] segments.
+   *
+   * A segment's end is pulled in to the inset point where the outline turns
+   * convexly (that edge exists AND the diagonal tile is open), pushed out past
+   * the tile boundary where it turns concavely (neighbour and diagonal are both
+   * wall, so the perpendicular line sits `inset` beyond the boundary), and
+   * otherwise runs to the boundary so straight runs stay continuous.
+   */
+  private wallSegments(inset: number): number[][][] {
+    const isWall = (c: number, r: number): boolean => this.isWallTile(c, r);
+    const end = (open: boolean, diagOpen: boolean, base: number, sign: number): number => {
+      if (open && diagOpen) return base + sign * inset;
+      if (!open && !diagOpen) return base - sign * inset;
+      return base;
     };
 
+    const rows: number[][][] = [];
+    for (let r = 0; r < ROWS; r++) {
+      const segs: number[][] = [];
+      for (let c = 0; c < COLS; c++) {
+        if (!isWall(c, r)) continue;
+        const x = c * TILE;
+        const y = r * TILE;
+        const L = !isWall(c - 1, r);
+        const R = !isWall(c + 1, r);
+        const T = !isWall(c, r - 1);
+        const B = !isWall(c, r + 1);
+        const TL = !isWall(c - 1, r - 1);
+        const TR = !isWall(c + 1, r - 1);
+        const BL = !isWall(c - 1, r + 1);
+        const BR = !isWall(c + 1, r + 1);
+
+        if (T) segs.push([end(L, TL, x, 1), y + inset, end(R, TR, x + TILE, -1), y + inset]);
+        if (B) segs.push([end(L, BL, x, 1), y + TILE - inset, end(R, BR, x + TILE, -1), y + TILE - inset]);
+        if (L) segs.push([x + inset, end(T, TL, y, 1), x + inset, end(B, BL, y + TILE, -1)]);
+        if (R) segs.push([x + TILE - inset, end(T, TR, y, 1), x + TILE - inset, end(B, BR, y + TILE, -1)]);
+      }
+      rows.push(segs);
+    }
+    return rows;
+  }
+
+  private strokeSegments(
+    g: Graphics,
+    rows: number[][][],
+    width: number,
+    alpha: number,
+    tint: (base: number) => number = (c) => c,
+  ): void {
+    rows.forEach((segs, r) => {
+      if (!segs.length) return;
+      for (const [x1, y1, x2, y2] of segs) g.moveTo(x1, y1).lineTo(x2, y2);
+      const col = tint(lerpColor(PALETTE.wallTop, PALETTE.wallBot, r / (ROWS - 1)));
+      g.stroke({ width, color: col, alpha, cap: 'round', join: 'round' });
+    });
+  }
+
+  private buildMaze(): void {
     // Solid fill, row-tinted for a vertical gradient.
     for (let r = 0; r < ROWS; r++) {
       const col = lerpColor(0x120727, 0x1f0c3c, r / (ROWS - 1));
@@ -265,59 +316,67 @@ export class Game {
       }
     }
 
-    // Neon outline: only the edges that face open space, grouped by row so each
-    // row can carry its own gradient colour.
+    // Neon tubes: a soft halo, an inner "double wall" echo (the classic arcade
+    // two-line look), the coloured tube itself and a white-hot core.
+    const outer = this.wallSegments(2);
+    const inner = this.wallSegments(8);
+    this.strokeSegments(this.mazeGfx, outer, 11, 0.07);
+    this.strokeSegments(this.mazeGfx, inner, 1.5, 0.42);
+    this.strokeSegments(this.mazeGfx, outer, 3, 1);
+    this.strokeSegments(this.mazeGfx, outer, 1, 0.55, (c) => lerpColor(c, PALETTE.white, 0.75));
+
+    this.buildFloor();
+  }
+
+  /**
+   * The corridor floor: a faint synthwave grid (it scrolls, see drawFloorGrid)
+   * plus light spilling off every neon wall onto the adjacent floor, and a warm
+   * glow inside the ghost house. Walls are opaque, so the grid only shows
+   * through the corridors.
+   */
+  private buildFloor(): void {
+    const grid = this.floorGrid;
+    grid.clear();
+    for (let x = 0; x <= COLS; x++) grid.moveTo(x * TILE, -TILE).lineTo(x * TILE, WORLD_H + TILE);
+    for (let y = -1; y <= ROWS + 1; y++) grid.moveTo(0, y * TILE).lineTo(WORLD_W, y * TILE);
+    grid.stroke({ width: 1, color: PALETTE.grid, alpha: 0.075 });
+
+    const glow = this.floorGlow;
+    glow.clear();
+    const spill = [3, 7, 12];
     for (let r = 0; r < ROWS; r++) {
-      let started = false;
       const col = lerpColor(PALETTE.wallTop, PALETTE.wallBot, r / (ROWS - 1));
       for (let c = 0; c < COLS; c++) {
-        if (!isWall(c, r)) continue;
+        if (this.isWallTile(c, r)) continue;
+        // Out-of-bounds tiles (the tunnel mouths) aren't walls: no spill there.
+        const wallAt = (cc: number, rr: number): boolean => cc >= 0 && cc < COLS && this.isWallTile(cc, rr);
         const x = c * TILE;
         const y = r * TILE;
-        // Corner-aware outline. A segment's end is pulled in to the inset
-        // corner point only when the perpendicular edge actually turns there
-        // (i.e. that edge exists AND the diagonal tile is open). Otherwise it
-        // runs to the tile boundary so runs stay continuous and corners join
-        // cleanly instead of crossing and leaving spurs.
-        const L = !isWall(c - 1, r);
-        const R = !isWall(c + 1, r);
-        const T = !isWall(c, r - 1);
-        const B = !isWall(c, r + 1);
-        const TL = !isWall(c - 1, r - 1);
-        const TR = !isWall(c + 1, r - 1);
-        const BL = !isWall(c - 1, r + 1);
-        const BR = !isWall(c + 1, r + 1);
-
-        if (T) {
-          this.mazeGfx
-            .moveTo(L && TL ? x + inset : x, y + inset)
-            .lineTo(R && TR ? x + TILE - inset : x + TILE, y + inset);
-          started = true;
+        for (const w of spill) {
+          if (wallAt(c, r - 1)) glow.rect(x, y, TILE, w);
+          if (wallAt(c, r + 1)) glow.rect(x, y + TILE - w, TILE, w);
+          if (wallAt(c - 1, r)) glow.rect(x, y, w, TILE);
+          if (wallAt(c + 1, r)) glow.rect(x + TILE - w, y, w, TILE);
         }
-        if (B) {
-          this.mazeGfx
-            .moveTo(L && BL ? x + inset : x, y + TILE - inset)
-            .lineTo(R && BR ? x + TILE - inset : x + TILE, y + TILE - inset);
-          started = true;
-        }
-        if (L) {
-          this.mazeGfx
-            .moveTo(x + inset, T && TL ? y + inset : y)
-            .lineTo(x + inset, B && BL ? y + TILE - inset : y + TILE);
-          started = true;
-        }
-        if (R) {
-          this.mazeGfx
-            .moveTo(x + TILE - inset, T && TR ? y + inset : y)
-            .lineTo(x + TILE - inset, B && BR ? y + TILE - inset : y + TILE);
-          started = true;
-        }
-      }
-      if (started) {
-        this.mazeGfx.stroke({ width: 3, color: col, cap: 'round', join: 'round' });
+        glow.fill({ color: col, alpha: 0.045 });
       }
     }
-    this.mazeGfx.position.set(0, 0);
+
+    // Ghost house: a little striped sunset behind the waiting ghosts.
+    const hx = 11 * TILE;
+    const hy = 13 * TILE;
+    const hw = 6 * TILE;
+    const hh = 3 * TILE;
+    const stripes = 9;
+    for (let i = 0; i < stripes; i++) {
+      const t = i / (stripes - 1);
+      const sh = hh / stripes;
+      const gap = sh * 0.45 * t;
+      glow.rect(hx, hy + i * sh + gap, hw, sh - gap).fill({
+        color: lerpColor(PALETTE.sunMid, PALETTE.sunBot, t),
+        alpha: 0.13 * (1 - t * 0.6),
+      });
+    }
   }
 
   /**
@@ -371,6 +430,50 @@ export class Game {
     }
   }
 
+  /** Slow downward scroll of the floor grid — the synthwave road, underfoot. */
+  private drawFloorGrid(): void {
+    this.floorGrid.y = (this.elapsed * 5) % TILE;
+    this.floorGrid.alpha = 0.8 + 0.2 * Math.sin(this.elapsed * 0.7);
+  }
+
+  /** A few pellets at a time flare into a brief four-point glint. */
+  private drawSparkles(): void {
+    const g = this.sparkleGfx;
+    g.clear();
+    const t = this.elapsed;
+    for (let i = 0; i < this.maze.dots.length; i++) {
+      if (this.maze.dots[i] !== 1) continue;
+      const h = lattice(i, 7, 3);
+      const s = Math.sin(t * (0.5 + h * 0.6) + h * 60);
+      if (s < 0.99) continue;
+      const k = (s - 0.99) / 0.01;
+      const c = i % COLS;
+      const r = (i / COLS) | 0;
+      drawSparkle(g, centerOf(c), centerOf(r), TILE * 0.3 * k, PALETTE.white, 0.85 * k, t * 2);
+    }
+  }
+
+  /** The wrap-around tunnel mouths: warp-gate stripes streaming outward. */
+  private drawPortals(): void {
+    const g = this.portalGfx;
+    g.clear();
+    const y = TUNNEL_ROW * TILE;
+    const depth = TILE * 1.6;
+    for (const side of [-1, 1]) {
+      const edge = side < 0 ? 0 : WORLD_W;
+      for (let i = 0; i < 4; i++) {
+        const w = depth * (1 - i / 4);
+        g.rect(side < 0 ? edge : edge - w, y + 4, w, TILE - 8).fill({ color: PALETTE.accent2, alpha: 0.035 });
+      }
+      for (let k = 0; k < 6; k++) {
+        const p = (this.elapsed * 1.2 + k / 6) % 1;
+        const x = edge - side * depth * (1 - p);
+        g.rect(x - 1, y + 5, 2, TILE - 10).fill({ color: PALETTE.accent2, alpha: 0.5 * p });
+      }
+      g.rect(side < 0 ? edge : edge - 2, y + 2, 2, TILE - 4).fill({ color: PALETTE.white, alpha: 0.6 });
+    }
+  }
+
   /**
    * Full-canvas backdrop so the background is continuous edge to edge, behind
    * both the maze viewport and the side panel.
@@ -393,10 +496,14 @@ export class Game {
     const rad = TILE * 0.085;
     for (let i = 0; i < this.maze.dots.length; i++) {
       if (this.maze.dots[i] !== 1) continue;
-      const c = i % COLS;
-      const r = (i / COLS) | 0;
-      this.dotGfx.circle(centerOf(c), centerOf(r), rad).fill(PALETTE.dot);
+      this.dotGfx.circle(centerOf(i % COLS), centerOf((i / COLS) | 0), rad * 2.6);
     }
+    this.dotGfx.fill({ color: PALETTE.accent, alpha: 0.13 });
+    for (let i = 0; i < this.maze.dots.length; i++) {
+      if (this.maze.dots[i] !== 1) continue;
+      this.dotGfx.circle(centerOf(i % COLS), centerOf((i / COLS) | 0), rad);
+    }
+    this.dotGfx.fill(PALETTE.dot);
   }
 
   // -------------------------------------------------------------------------
@@ -547,6 +654,7 @@ export class Game {
     this.audio.pincer();
     this.fx.flash(PALETTE.accent2, 0.4, 0.35);
     this.fx.shake(6, 0.35);
+    this.fx.ring(this.playerGhost.px, this.playerGhost.py, PALETTE.accent2, TILE * 6, 0.7, 4);
     this.flashMessage('PINCER!', 'SQUAD CONVERGING', PALETTE.accent2, PINCER_TIME);
   }
 
@@ -557,6 +665,7 @@ export class Game {
     if (!g || g.cooldown > 0 || g.state !== 'normal') return;
     g.cooldown = g.def.cooldown;
     this.audio.ability();
+    this.fx.ring(g.px, g.py, g.def.color, TILE * 1.8, 0.35, 2.5);
     switch (g.def.ability) {
       case 'dash':
         g.dashTimer = ABILITY_TIME;
@@ -906,6 +1015,7 @@ export class Game {
       this.audio.powerUp();
       this.fx.flash(PALETTE.power, 0.35, 0.3);
       this.fx.shake(5, 0.3);
+      this.fx.ring(this.pac.px, this.pac.py, PALETTE.power, TILE * 5, 0.7, 4);
       this.flashMessage('POWER UP!', 'PAC-MAN HUNTS YOU', PALETTE.power, 1.4);
     } else {
       this.fx.burst(this.pac.px, this.pac.py, PALETTE.dot, 5, {
@@ -963,6 +1073,7 @@ export class Game {
 
   private demoReset(): void {
     this.fx.burst(this.pac.px, this.pac.py, PALETTE.pac, 30, { speed: 220, life: 0.7, size: 4 });
+    this.fx.ring(this.pac.px, this.pac.py, PALETTE.pac, TILE * 3, 0.5, 3);
     this.spawnRound();
   }
 
@@ -975,7 +1086,9 @@ export class Game {
     this.fx.flash(PALETTE.gold, 0.55, 0.25);
     this.fx.shake(10, 0.5);
     this.fx.burst(this.pac.px, this.pac.py, PALETTE.pac, 44, { speed: 280, life: 0.8, size: 4 });
-    this.fx.pop(`+${pts}${combo > 1 ? ' ×2' : ''}`, this.pac.px, this.pac.py - 24, PALETTE.gold, 16);
+    this.fx.ring(this.pac.px, this.pac.py, PALETTE.gold, TILE * 4, 0.6, 4);
+    this.fx.ring(this.pac.px, this.pac.py, PALETTE.accent, TILE * 2.4, 0.45, 2);
+    this.fx.pop(`+${pts}${combo > 1 ? ' ×2' : ''}`, this.pac.px, this.pac.py - 24, PALETTE.gold, 20);
 
     this.pac.alive = false;
     this.pac.deathT = 0;
@@ -1014,7 +1127,8 @@ export class Game {
     this.fx.shake(7, 0.4);
     this.fx.flash(PALETTE.power, 0.4, 0.22);
     this.fx.burst(g.px, g.py, g.def.color, 30, { speed: 240, life: 0.7, size: 4 });
-    this.fx.pop(`+${pts}`, g.px, g.py - 18, PALETTE.power, 13);
+    this.fx.ring(g.px, g.py, PALETTE.power, TILE * 2.6, 0.5, 3);
+    this.fx.pop(`+${pts}`, g.px, g.py - 18, PALETTE.power, 16);
     this.freezeTimer = demo ? 0 : 0.35;
 
     if (g.isPlayer && !demo) {
@@ -1057,8 +1171,12 @@ export class Game {
     }
     // Drift the wall texture for a subtle living surface.
     this.drawWallDots();
+    this.drawFloorGrid();
+    this.drawSparkles();
+    this.drawPortals();
     this.drawPower();
     this.drawDoorGfx();
+    this.drawTrails();
     this.drawPac();
     for (const g of this.ghosts) this.drawGhostView(g);
     this.drawDecoy();
@@ -1096,13 +1214,22 @@ export class Game {
 
   private drawPower(): void {
     this.powerGfx.clear();
+    const g = this.powerGfx;
     const a = 0.85 + 0.15 * Math.sin(this.elapsed * 6);
     const r = TILE * 0.2 * a;
+    let n = 0;
     for (let i = 0; i < this.maze.dots.length; i++) {
       if (this.maze.dots[i] !== 2) continue;
-      const c = i % COLS;
-      const rr = (i / COLS) | 0;
-      this.powerGfx.circle(centerOf(c), centerOf(rr), r).fill(PALETTE.power);
+      const x = centerOf(i % COLS);
+      const y = centerOf((i / COLS) | 0);
+      n++;
+      // Sonar ripple, halo, core and a slowly turning glint.
+      const k = (this.elapsed * 0.7 + n * 0.23) % 1;
+      g.circle(x, y, r * (1.1 + 2.4 * k)).stroke({ width: 1.5, color: PALETTE.power, alpha: 0.55 * (1 - k) });
+      g.circle(x, y, r * 2).fill({ color: PALETTE.power, alpha: 0.12 });
+      g.circle(x, y, r).fill(PALETTE.power);
+      g.circle(x - r * 0.25, y - r * 0.25, r * 0.45).fill({ color: PALETTE.white, alpha: 0.8 });
+      drawSparkle(g, x, y, r * 2.3, PALETTE.white, 0.35 + 0.2 * a, this.elapsed * 0.8);
     }
   }
 
@@ -1119,13 +1246,14 @@ export class Game {
     if (!this.pac.alive) {
       const t = Math.min(1, this.pac.deathT / 1.1);
       const r = TILE * 0.46 * (1 - t);
-      if (r > 0.6) drawPacman(g, r, 0.05 + t * 2.6, PALETTE.pac);
+      if (r > 0.6) drawPacman(g, r, 0.05 + t * 2.6, PALETTE.pac, this.pacAngle);
       g.position.set(this.pac.px, this.pac.py);
-      this.pacAngle = angleLerp(this.pacAngle, this.pacAngle, 1);
       g.rotation = this.pacAngle;
       return;
     }
-    drawPacman(g, TILE * 0.46, this.pac.mouth, PALETTE.pac);
+    const target = dirAngle(this.pac.mover.dir, this.pacAngle);
+    this.pacAngle = angleLerp(this.pacAngle, target, 0.25);
+    drawPacman(g, TILE * 0.46, this.pac.mouth, PALETTE.pac, this.pacAngle);
     // Powered up: a visible "hunter" aura so the reversal reads instantly.
     if (this.pac.powered) {
       const pulse = 0.6 + 0.4 * Math.sin(this.elapsed * 12);
@@ -1141,8 +1269,6 @@ export class Game {
       });
     }
     g.position.set(this.pac.px, this.pac.py);
-    const target = dirAngle(this.pac.mover.dir, this.pacAngle);
-    this.pacAngle = angleLerp(this.pacAngle, target, 0.25);
     g.rotation = this.pacAngle;
   }
 
@@ -1151,7 +1277,20 @@ export class Game {
     if (!view) return;
     view.clear();
     const frightened = g.state === 'frightened';
-    drawGhost(view, TILE * 0.45, {
+    const eaten = g.state === 'eaten';
+    const r = TILE * 0.45;
+    const body = frightened ? PALETTE.frightBody : g.def.color;
+    if (!eaten) {
+      // Neon light pooling on the floor beneath the skirt.
+      view.ellipse(0, r * 1.02, r * 0.85, r * 0.2).fill({ color: body, alpha: 0.22 });
+    }
+    if (g.mover.phase && !eaten) {
+      // PHASE: the ghost de-syncs into chromatic ghost images while in the wall.
+      const j = Math.sin(this.elapsed * 40) * 1.5;
+      drawGhostSilhouette(view, -3 + j, 0, r, 3, PALETTE.accent, 0.45);
+      drawGhostSilhouette(view, 3 - j, 0, r, 3, PALETTE.accent2, 0.45);
+    }
+    drawGhost(view, r, {
       color: g.def.color,
       dir: g.mover.dir,
       frightened,
@@ -1160,7 +1299,61 @@ export class Game {
       wave: 2.5 + 2.5 * Math.sin(this.elapsed * 9 + g.mover.tx),
     });
     view.position.set(g.px, g.py);
-    view.alpha = g.state === 'eaten' ? 0.75 : 1;
+    view.alpha = eaten ? 0.75 : g.mover.phase ? 0.7 : 1;
+  }
+
+  /**
+   * Motion trails. Every actor leaves a faint long-exposure smear; SHADOW DASH
+   * and a powered Pac-Man leave a bright one. Samples that jump (tunnel wrap,
+   * blink, respawn) break the trail instead of streaking across the board.
+   */
+  private drawTrails(): void {
+    const g = this.trailGfx;
+    g.clear();
+    const LEN = 10;
+    const sample = (key: string, x: number, y: number): Array<{ x: number; y: number }> => {
+      let pts = this.trails.get(key);
+      if (!pts) {
+        pts = [];
+        this.trails.set(key, pts);
+      }
+      const last = pts[pts.length - 1];
+      if (last && Math.hypot(last.x - x, last.y - y) > TILE * 1.5) pts.length = 0;
+      pts.push({ x, y });
+      if (pts.length > LEN) pts.shift();
+      return pts;
+    };
+
+    const r = TILE * 0.45;
+    for (const gh of this.ghosts) {
+      const pts = sample(gh.id, gh.px, gh.py);
+      if (gh.state === 'house') continue;
+      const dashing = gh.dashTimer > 0;
+      const eaten = gh.state === 'eaten';
+      const color = gh.state === 'frightened' ? PALETTE.frightBody : gh.def.color;
+      for (let i = 0; i < pts.length - 1; i += 2) {
+        const k = (i + 1) / pts.length;
+        const p = pts[i];
+        if (eaten) {
+          g.circle(p.x, p.y, 2 + k * 2).fill({ color: PALETTE.eyeWhite, alpha: 0.12 * k });
+        } else {
+          const tint = dashing ? lerpColor(color, PALETTE.white, 0.35) : color;
+          drawGhostSilhouette(g, p.x, p.y, r * (0.8 + 0.2 * k), 3, tint, (dashing ? 0.34 : 0.07) * k);
+        }
+      }
+    }
+
+    const pts = sample('pac', this.pac.px, this.pac.py);
+    if (!this.pac.alive) return;
+    const powered = this.pac.powered;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const k = (i + 1) / pts.length;
+      const p = pts[i];
+      g.circle(p.x, p.y, TILE * 0.4 * (0.55 + 0.45 * k)).fill({
+        color: powered ? PALETTE.power : PALETTE.pac,
+        alpha: (powered ? 0.16 : 0.05) * k,
+      });
+    }
   }
 
   private drawDecoy(): void {
@@ -1302,6 +1495,21 @@ export class Game {
     this.menu.layout();
     this.fx.resize(SCREEN_W, SCREEN_H);
     this.crt?.resize(this.app.renderer.width, this.app.renderer.height);
+    this.clearStaleFilterTextures();
+  }
+
+  /**
+   * Workaround for a Pixi 8.21 bug. FilterSystem.push() picks a nested
+   * filter's resolution from its stack slot's input texture *from the previous
+   * frame*. A resize prunes idle screen-sized textures from the pool, leaving
+   * that slot pointing at a destroyed texture; the null source then throws
+   * inside the ticker, and Pixi's ticker stops scheduling frames for good (the
+   * game freezes). Clearing the slots makes it fall back to the root
+   * resolution for the one frame before they are refilled.
+   */
+  private clearStaleFilterTextures(): void {
+    const fs = this.app.renderer.filter as unknown as { _filterStack?: Array<{ inputTexture: unknown }> };
+    for (const slot of fs._filterStack ?? []) slot.inputTexture = null;
   }
 
   /** Called on window resize; keeps the CRT in step with the render target. */

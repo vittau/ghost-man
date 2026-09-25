@@ -1,5 +1,6 @@
-import { Graphics } from 'pixi.js';
+import { FillGradient, Graphics } from 'pixi.js';
 import { PALETTE } from './config';
+import { lerpColor } from './color';
 import { DIRS } from './types';
 import type { Dir } from './types';
 
@@ -8,17 +9,43 @@ import type { Dir } from './types';
 // position + rotate the containing display object freely.
 // ---------------------------------------------------------------------------
 
-/** Pac-Man disc with an animated wedge mouth. `mouth` is a half-angle in radians. */
-export function drawPacman(g: Graphics, r: number, mouth: number, color = PALETTE.pac): void {
-  const a = Math.min(Math.PI * 0.48, Math.max(0.02, mouth));
-  g.moveTo(0, 0);
-  g.arc(0, 0, r, a, Math.PI * 2 - a);
-  g.lineTo(0, 0);
-  g.fill(color);
+/** Rim tone for Pac-Man's shading: the yellow pushed toward sunset orange. */
+const PAC_RIM = lerpColor(PALETTE.pac, 0xff7a3d, 0.5);
 
-  // Specular highlight for a glossy, semi-chrome look.
-  g.circle(-r * 0.28, -r * 0.38, r * 0.16);
-  g.fill({ color: PALETTE.pacGlow, alpha: 0.55 });
+/**
+ * Pac-Man disc with an animated wedge mouth. `mouth` is a half-angle in radians.
+ * `rotation` is the rotation the caller applies to the view; the specular
+ * highlight counter-rotates so the light always comes from the top-left.
+ */
+export function drawPacman(
+  g: Graphics,
+  r: number,
+  mouth: number,
+  color = PALETTE.pac,
+  rotation = 0,
+): void {
+  const a = Math.min(Math.PI * 0.48, Math.max(0.02, mouth));
+  const wedge = (rr: number, c: number): void => {
+    g.moveTo(0, 0);
+    g.arc(0, 0, rr, a, Math.PI * 2 - a);
+    g.lineTo(0, 0);
+    g.fill(c);
+  };
+
+  // Concentric wedges share the mouth edges, so only the arc picks up the
+  // warmer rim — a cheap spherical shade that survives any mouth angle.
+  wedge(r, color === PALETTE.pac ? PAC_RIM : lerpColor(color, 0x000000, 0.25));
+  wedge(r * 0.84, color);
+
+  // Specular highlight for a glossy, semi-chrome look (fixed to world space).
+  const cos = Math.cos(-rotation);
+  const sin = Math.sin(-rotation);
+  const hx = -r * 0.3;
+  const hy = -r * 0.4;
+  const sx = hx * cos - hy * sin;
+  const sy = hx * sin + hy * cos;
+  g.circle(sx, sy, r * 0.2).fill({ color: PALETTE.pacGlow, alpha: 0.35 });
+  g.circle(sx, sy, r * 0.1).fill({ color: PALETTE.white, alpha: 0.7 });
 }
 
 export interface GhostStyle {
@@ -34,35 +61,90 @@ export interface GhostStyle {
   lookY?: number;
 }
 
+// Vertical body gradients are cached per colour: FillGradient owns a texture,
+// so building one per ghost per frame would churn GPU memory.
+const bodyGradients = new Map<number, FillGradient>();
+
+function bodyGradient(color: number): FillGradient {
+  let grad = bodyGradients.get(color);
+  if (!grad) {
+    grad = new FillGradient({
+      type: 'linear',
+      start: { x: 0, y: 0 },
+      end: { x: 0, y: 1 },
+      textureSpace: 'local',
+      colorStops: [
+        { offset: 0, color: lerpColor(color, PALETTE.white, 0.38) },
+        { offset: 0.42, color },
+        { offset: 1, color: lerpColor(color, PALETTE.bgDeep, 0.42) },
+      ],
+    });
+    bodyGradients.set(color, grad);
+  }
+  return grad;
+}
+
+/** Trace the ghost outline (dome + scalloped skirt) as the current path. */
+export function ghostPath(g: Graphics, r: number, wave: number): void {
+  const yb = r * 0.86; // skirt baseline
+  g.moveTo(-r, yb);
+  g.lineTo(-r, 0);
+  g.arc(0, 0, r, Math.PI, Math.PI * 2);
+  g.lineTo(r, yb);
+
+  const n = 3;
+  const w = (2 * r) / n;
+  for (let i = 0; i < n; i++) {
+    const xa = r - i * w;
+    const xb = xa - w / 2;
+    const xc = xa - w;
+    const dip = (i % 2 === 0 ? 1 : -0.35) * wave;
+    g.quadraticCurveTo(xb, yb + dip, xc, yb);
+  }
+  g.closePath();
+}
+
+/** Flat ghost silhouette, used for afterimages and trails. */
+export function drawGhostSilhouette(
+  g: Graphics,
+  x: number,
+  y: number,
+  r: number,
+  wave: number,
+  color: number,
+  alpha: number,
+): void {
+  const yb = r * 0.86;
+  g.moveTo(x - r, y + yb);
+  g.lineTo(x - r, y);
+  g.arc(x, y, r, Math.PI, Math.PI * 2);
+  g.lineTo(x + r, y + yb);
+  const w = (2 * r) / 3;
+  for (let i = 0; i < 3; i++) {
+    const xa = x + r - i * w;
+    const dip = (i % 2 === 0 ? 1 : -0.35) * wave;
+    g.quadraticCurveTo(xa - w / 2, y + yb + dip, xa - w, y + yb);
+  }
+  g.closePath();
+  g.fill({ color, alpha });
+}
+
 /** Classic ghost: domed head, three-scallop skirt, tracking eyes. */
 export function drawGhost(g: Graphics, r: number, style: GhostStyle): void {
   const { dir, frightened = false, flash = false, eaten = false } = style;
   const wave = style.wave ?? 0;
-  const yb = r * 0.86; // skirt baseline
 
   if (!eaten) {
     const body = frightened ? (flash ? PALETTE.frightFlash : PALETTE.frightBody) : style.color;
 
-    g.moveTo(-r, yb);
-    g.lineTo(-r, 0);
-    g.arc(0, 0, r, Math.PI, Math.PI * 2);
-    g.lineTo(r, yb);
+    ghostPath(g, r, wave);
+    g.fill(bodyGradient(body));
 
-    const n = 3;
-    const w = (2 * r) / n;
-    for (let i = 0; i < n; i++) {
-      const xa = r - i * w;
-      const xb = xa - w / 2;
-      const xc = xa - w;
-      const dip = (i % 2 === 0 ? 1 : -0.35) * wave;
-      g.quadraticCurveTo(xb, yb + dip, xc, yb);
-    }
-    g.closePath();
-    g.fill(body);
-
-    // Top highlight — glassy dome.
+    // Rim light along the upper-left of the dome, plus a glassy highlight.
+    g.arc(0, 0, r * 0.84, Math.PI * 1.08, Math.PI * 1.42);
+    g.stroke({ width: r * 0.09, color: PALETTE.white, alpha: frightened ? 0.18 : 0.4, cap: 'round' });
     g.ellipse(-r * 0.3, -r * 0.45, r * 0.34, r * 0.2);
-    g.fill({ color: PALETTE.white, alpha: frightened ? 0.1 : 0.16 });
+    g.fill({ color: PALETTE.white, alpha: frightened ? 0.08 : 0.12 });
   }
 
   const ex = r * 0.4;
@@ -96,10 +178,40 @@ export function drawGhost(g: Graphics, r: number, style: GhostStyle): void {
   const ly = (style.lookY ?? look.y) * r * 0.17;
   g.circle(-ex + lx, ey + ly, r * 0.17).fill(PALETTE.eyePupil);
   g.circle(ex + lx, ey + ly, r * 0.17).fill(PALETTE.eyePupil);
+  // A catch-light in each pupil makes the eyes read as glossy, not painted on.
+  g.circle(-ex + lx - r * 0.06, ey + ly - r * 0.07, r * 0.055).fill({ color: PALETTE.white, alpha: 0.85 });
+  g.circle(ex + lx - r * 0.06, ey + ly - r * 0.07, r * 0.055).fill({ color: PALETTE.white, alpha: 0.85 });
 }
 
-/** The house door: a pulsing bar. */
+/** Four-point star flare, the classic lens glint. */
+export function drawSparkle(
+  g: Graphics,
+  x: number,
+  y: number,
+  size: number,
+  color: number,
+  alpha: number,
+  rotation = 0,
+): void {
+  const w = size * 0.22;
+  for (let k = 0; k < 4; k++) {
+    const a = rotation + (k * Math.PI) / 2;
+    const ca = Math.cos(a);
+    const sa = Math.sin(a);
+    g.moveTo(x + ca * size, y + sa * size);
+    g.lineTo(x - sa * w, y + ca * w);
+    g.lineTo(x + sa * w, y - ca * w);
+    g.closePath();
+  }
+  g.fill({ color, alpha });
+}
+
+/** The house door: a pulsing bar with a white-hot neon core. */
 export function drawDoor(g: Graphics, w: number, h: number, alpha: number): void {
+  g.roundRect(-w / 2, -h / 2 - 3, w, h + 6, (h + 6) / 2);
+  g.fill({ color: PALETTE.door, alpha: alpha * 0.25 });
   g.roundRect(-w / 2, -h / 2, w, h, h / 2);
   g.fill({ color: PALETTE.door, alpha });
+  g.roundRect(-w / 2 + 3, -0.75, w - 6, 1.5, 0.75);
+  g.fill({ color: PALETTE.white, alpha: Math.min(1, alpha + 0.2) });
 }

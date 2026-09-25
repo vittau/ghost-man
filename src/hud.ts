@@ -12,6 +12,7 @@ import {
   VIEW_W,
 } from './config';
 import { drawGhost, drawPacman } from './draw';
+import { lerpColor } from './color';
 import type { Stance } from './types';
 
 export interface HudState {
@@ -46,9 +47,13 @@ export interface HudState {
 
 // Vertical positions are fixed (canvas height never changes); layout()
 // recomputes the horizontal ones so the panel tracks the window width.
-const STANCE_ROW_Y = [170, 202, 234, 266];
-const GHOST_BOX_Y = 420;
-const GHOST_BOX_H = 136;
+// Sized for a 7" 1280x800 handheld: nothing smaller than 10px.
+const STANCE_ROW_Y = [138, 178, 218, 258];
+const GHOST_BOX_Y = 408;
+const GHOST_BOX_H = 118;
+const PINCER_BAR_Y = 318;
+const ABILITY_BAR_Y = 376;
+const LIVES_Y = 544;
 
 const mkText = (
   text: string,
@@ -77,32 +82,32 @@ export class Hud {
   private readonly lifeIcons: Graphics[] = [];
   private readonly pacIcons: Graphics[] = [];
 
-  private readonly scoreLabel = mkText('SCORE', 8, PALETTE.textDim);
-  private readonly scoreValue = mkText('000000', 16, PALETTE.text);
-  private readonly highLabel = mkText('HIGH SCORE', 8, PALETTE.textDim);
-  private readonly highValue = mkText('000000', 11, PALETTE.accent);
-  private readonly levelLabel = mkText('LEVEL', 8, PALETTE.textDim);
-  private readonly levelValue = mkText('1', 11, PALETTE.accent2);
-  private readonly squadTitle = mkText('SQUAD ORDERS', 8, PALETTE.accent2);
+  private readonly scoreLabel = mkText('SCORE', 10, PALETTE.textDim);
+  private readonly scoreValue = mkText('000000', 24, PALETTE.text);
+  private readonly highLabel = mkText('HIGH', 10, PALETTE.textDim);
+  private readonly highValue = mkText('000000', 13, PALETTE.accent);
+  private readonly levelLabel = mkText('LEVEL', 10, PALETTE.textDim);
+  private readonly levelValue = mkText('1', 13, PALETTE.accent2);
+  private readonly squadTitle = mkText('SQUAD ORDERS', 11, PALETTE.accent2);
   private readonly stanceNames: Text[] = [];
   private readonly stanceDescs: Text[] = [];
   private readonly barsKeyLabels: Text[] = [];
-  private readonly pincerLabel = mkText('PINCER  [SPACE]', 8, PALETTE.textDim);
-  private readonly abilityLabel = mkText('ABILITY  [SHIFT]', 8, PALETTE.textDim);
-  private readonly abilityValue = mkText('', 11, PALETTE.gold);
-  private readonly yourGhostLabel = mkText('YOUR GHOST', 8, PALETTE.accent2);
-  private readonly playerNameText = mkText('', 12, PALETTE.text);
-  private readonly playerAbilityText = mkText('', 8, PALETTE.text);
-  private readonly playerAbilityDesc = mkText('', 7, PALETTE.textDim);
-  private readonly livesLabel = mkText('LIVES', 8, PALETTE.textDim);
-  private readonly pacLivesLabel = mkText('CATCHES LEFT', 8, PALETTE.textDim);
-  private readonly keyHint1 = mkText('1-4 STANCE   P PAUSE', 7, PALETTE.textDim);
-  private readonly keyHint2 = mkText('M MUSIC  C CRT  F FPS', 7, PALETTE.textDim);
-  private readonly trackText = mkText('', 7, PALETTE.textDim);
-  private readonly fpsText = mkText('', 9, PALETTE.accent2);
+  private readonly pincerLabel = mkText('PINCER [SPACE]', 10, PALETTE.textDim);
+  private readonly abilityLabel = mkText('ABILITY [SHIFT]', 10, PALETTE.textDim);
+  private readonly abilityValue = mkText('', 13, PALETTE.gold);
+  private readonly yourGhostLabel = mkText('YOUR GHOST', 11, PALETTE.accent2);
+  private readonly playerNameText = mkText('', 15, PALETTE.text);
+  private readonly playerAbilityText = mkText('', 11, PALETTE.text);
+  private readonly playerAbilityDesc = mkText('', 10, PALETTE.textDim);
+  private readonly livesLabel = mkText('LIVES', 10, PALETTE.textDim);
+  private readonly pacLivesLabel = mkText('CATCHES', 10, PALETTE.textDim);
+  private readonly keyHint1 = mkText('1-4 STANCE  P PAUSE', 10, PALETTE.textDim);
+  private readonly keyHint2 = mkText('M MUSIC  C CRT', 10, PALETTE.textDim);
+  private readonly trackText = mkText('', 10, PALETTE.textDim);
+  private readonly fpsText = mkText('', 11, PALETTE.accent2);
 
-  private readonly message = mkText('', 28, PALETTE.gold, 'center');
-  private readonly submessage = mkText('', 11, PALETTE.text, 'center');
+  private readonly message = mkText('', 34, PALETTE.gold, 'center');
+  private readonly submessage = mkText('', 14, PALETTE.text, 'center');
   private readonly frightBar = new Graphics();
 
   private panelX = 0;
@@ -113,11 +118,11 @@ export class Hud {
     this.layer.eventMode = 'none';
 
     STANCE_ROW_Y.forEach(() => {
-      this.stanceNames.push(mkText('', 10, PALETTE.text));
-      this.stanceDescs.push(mkText('', 7, PALETTE.textDim));
+      this.stanceNames.push(mkText('', 12, PALETTE.text));
+      this.stanceDescs.push(mkText('', 10, PALETTE.textDim));
     });
     for (let i = 0; i < STANCE_ORDER.length; i++) {
-      const t = mkText(STANCE_INFO[STANCE_ORDER[i]].key, 9, PALETTE.white, 'center');
+      const t = mkText(STANCE_INFO[STANCE_ORDER[i]].key, 11, PALETTE.white, 'center');
       t.anchor.set(0.5, 0.5);
       this.barsKeyLabels.push(t);
     }
@@ -178,62 +183,73 @@ export class Hud {
     this.cw = HUD_W - 48;
 
     this.panel.clear();
-    this.panel.rect(this.panelX, 0, HUD_W, SCREEN_H).fill({ color: PALETTE.bgDeep, alpha: 0.34 });
+    this.panel.rect(this.panelX, 0, HUD_W, SCREEN_H).fill({ color: PALETTE.bgDeep, alpha: 0.5 });
+    // Neon seam between the maze and the panel, pink at the top to cyan below.
+    for (let i = 0; i < 24; i++) {
+      const t = i / 23;
+      const col = lerpColor(PALETTE.wallTop, PALETTE.wallBot, t);
+      const y = (i * SCREEN_H) / 24;
+      this.panel.rect(this.panelX, y, 2, SCREEN_H / 24 + 1).fill({ color: col, alpha: 0.75 });
+      this.panel.rect(this.panelX + 2, y, 6, SCREEN_H / 24 + 1).fill({ color: col, alpha: 0.08 });
+    }
 
     this.dividers.clear();
-    for (const y of [392, 572, 690]) {
+    for (const y of [104, 396, 534, 616]) {
       this.dividers.rect(this.panelX + 20, y, HUD_W - 40, 1).fill({ color: PALETTE.accent, alpha: 0.2 });
     }
 
     const x = this.cx;
-    this.scoreLabel.position.set(x, 24);
-    this.scoreValue.position.set(x, 38);
-    this.highLabel.position.set(x, 70);
-    this.highValue.position.set(x, 84);
-    this.levelLabel.position.set(x, 110);
-    this.levelValue.position.set(x, 124);
-    this.squadTitle.position.set(x, 154);
+    const col2 = x + Math.round(this.cw * 0.52);
+    this.scoreLabel.position.set(x, 18);
+    this.scoreValue.position.set(x, 34);
+    this.highLabel.position.set(x, 68);
+    this.highValue.position.set(x, 83);
+    this.levelLabel.position.set(col2, 68);
+    this.levelValue.position.set(col2, 83);
+    this.squadTitle.position.set(x, 116);
 
     STANCE_ROW_Y.forEach((y, i) => {
-      this.stanceNames[i].position.set(x + 30, y);
-      this.stanceDescs[i].position.set(x + 30, y + 14);
-      this.barsKeyLabels[i].position.set(x + 9, y + 9);
+      this.stanceNames[i].position.set(x + 34, y + 1);
+      this.stanceDescs[i].position.set(x + 34, y + 18);
+      this.barsKeyLabels[i].position.set(x + 11, y + 13);
     });
 
-    this.pincerLabel.position.set(x, 296);
-    this.abilityLabel.position.set(x, 336);
-    this.abilityValue.position.set(x, 350);
+    this.pincerLabel.position.set(x, PINCER_BAR_Y - 18);
+    this.abilityLabel.position.set(x, ABILITY_BAR_Y - 40);
+    this.abilityValue.position.set(x, ABILITY_BAR_Y - 22);
 
-    this.yourGhostLabel.position.set(x, 404);
-    this.bigGhost.position.set(x + 44, GHOST_BOX_Y + 62);
-    this.playerNameText.position.set(x + 90, GHOST_BOX_Y + 22);
-    this.playerAbilityText.position.set(x + 90, GHOST_BOX_Y + 46);
-    this.playerAbilityDesc.position.set(x + 90, GHOST_BOX_Y + 62);
+    this.yourGhostLabel.visible = false;
+    this.bigGhost.position.set(x + 40, GHOST_BOX_Y + 60);
+    this.playerNameText.position.set(x + 84, GHOST_BOX_Y + 16);
+    this.playerAbilityText.position.set(x + 84, GHOST_BOX_Y + 42);
+    this.playerAbilityDesc.position.set(x + 84, GHOST_BOX_Y + 62);
     this.playerAbilityDesc.style.wordWrap = true;
-    this.playerAbilityDesc.style.wordWrapWidth = this.cw - 92;
+    this.playerAbilityDesc.style.lineHeight = 15;
+    this.playerAbilityDesc.style.wordWrapWidth = this.cw - 86;
 
-    this.livesLabel.position.set(x, 584);
-    this.pacLivesLabel.position.set(x, 646);
-    this.keyHint1.position.set(x, 700);
-    this.keyHint2.position.set(x, 714);
-    this.trackText.position.set(x, 732);
+    this.livesLabel.position.set(x, LIVES_Y);
+    this.pacLivesLabel.position.set(col2, LIVES_Y);
+    this.keyHint1.position.set(x, 630);
+    this.keyHint2.position.set(x, 650);
+    this.trackText.position.set(x, 680);
     this.fpsText.position.set(18, 12);
 
-    this.message.position.set(VIEW_W / 2, 340);
+    this.message.position.set(VIEW_W / 2, 330);
     this.submessage.position.set(VIEW_W / 2, 378);
   }
 
   update(s: HudState): void {
     this.scoreValue.text = String(s.score).padStart(6, '0');
     this.highValue.text = String(s.high).padStart(6, '0');
-    this.levelValue.text = `LEVEL ${s.level}`;
+    this.levelValue.text = String(s.level);
     this.fpsText.visible = s.showFps;
     this.fpsText.text = `${Math.round(s.fps)} FPS`;
     this.abilityValue.text = s.abilityName;
     this.abilityValue.style.fill = s.abilityReady ? PALETTE.gold : PALETTE.textDim;
-    this.abilityLabel.text = s.abilityLocked ? 'ABILITY  LOCKED' : 'ABILITY  [SHIFT]';
+    this.abilityLabel.text = s.abilityLocked ? 'ABILITY LOCKED' : 'ABILITY [SHIFT]';
     this.abilityLabel.style.fill = s.abilityLocked ? PALETTE.danger : PALETTE.textDim;
-    this.trackText.text = s.trackName ? `♪ ${s.trackName}` : '';
+    // Already formatted (and ♪-prefixed) by Game.audioHintText().
+    this.trackText.text = s.trackName;
 
     this.playerNameText.text = s.playerName;
     this.playerNameText.style.fill = s.playerColor;
@@ -263,14 +279,14 @@ export class Hud {
       this.stanceDescs[i].style.fill = active ? PALETTE.text : PALETTE.textDim;
 
       if (active) {
-        this.bars.roundRect(this.cx - 6, y - 4, this.cw + 8, 30, 5).fill({ color: PALETTE.accent, alpha: 0.16 });
-        this.bars.roundRect(this.cx - 6, y - 4, 3, 30, 1.5).fill({ color: PALETTE.accent2 });
+        this.bars.roundRect(this.cx - 6, y - 5, this.cw + 8, 36, 5).fill({ color: PALETTE.accent, alpha: 0.16 });
+        this.bars.roundRect(this.cx - 6, y - 5, 3, 36, 1.5).fill({ color: PALETTE.accent2 });
       }
-      this.bars.roundRect(this.cx, y, 18, 18, 4).fill({
+      this.bars.roundRect(this.cx, y + 2, 22, 22, 4).fill({
         color: active ? PALETTE.accent : PALETTE.wallFill,
         alpha: active ? 0.9 : 0.55,
       });
-      this.bars.roundRect(this.cx, y, 18, 18, 4).stroke({
+      this.bars.roundRect(this.cx, y + 2, 22, 22, 4).stroke({
         width: 1,
         color: active ? PALETTE.accent2 : PALETTE.wallDim,
         alpha: active ? 1 : 0.6,
@@ -285,23 +301,27 @@ export class Hud {
       this.bars.roundRect(10, 6, 84, 20, 4).stroke({ width: 1, color: PALETTE.accent2, alpha: 0.4 });
     }
 
-    const pY = 310;
-    this.bars.roundRect(this.cx, pY, this.cw, 8, 4).fill({ color: PALETTE.wallFill, alpha: 0.85 });
-    const pFrac = s.pincerReady ? 1 : 1 - s.pincerCd / s.pincerMax;
-    if (pFrac > 0) {
-      this.bars.roundRect(this.cx, pY, this.cw * pFrac, 8, 4).fill({
-        color: s.pincerReady ? PALETTE.accent2 : PALETTE.accent,
-      });
-    }
-
-    const aY = 368;
-    this.bars.roundRect(this.cx, aY, this.cw, 8, 4).fill({ color: PALETTE.wallFill, alpha: 0.85 });
+    this.ledBar(PINCER_BAR_Y, s.pincerReady ? 1 : 1 - s.pincerCd / s.pincerMax, s.pincerReady ? PALETTE.accent2 : PALETTE.accent);
     if (s.abilityLocked) {
-      this.bars.roundRect(this.cx, aY, this.cw, 8, 4).fill({ color: PALETTE.danger, alpha: 0.22 });
+      this.ledBar(ABILITY_BAR_Y, 1, PALETTE.danger, 0.3);
     } else {
-      const aFrac = s.abilityReady ? 1 : 1 - s.abilityCd / s.abilityMax;
-      if (aFrac > 0) {
-        this.bars.roundRect(this.cx, aY, this.cw * aFrac, 8, 4).fill({ color: PALETTE.gold });
+      this.ledBar(ABILITY_BAR_Y, s.abilityReady ? 1 : 1 - s.abilityCd / s.abilityMax, PALETTE.gold);
+    }
+  }
+
+  /** Segmented LED meter; the leading segment glows while it charges. */
+  private ledBar(y: number, frac: number, color: number, alpha = 1): void {
+    const n = 16;
+    const gap = 3;
+    const w = (this.cw - gap * (n - 1)) / n;
+    const lit = Math.max(0, Math.min(1, frac)) * n;
+    for (let i = 0; i < n; i++) {
+      const x = this.cx + i * (w + gap);
+      const k = Math.max(0, Math.min(1, lit - i));
+      this.bars.rect(x, y, w, 10).fill({ color: PALETTE.wallFill, alpha: 0.85 });
+      if (k > 0) {
+        this.bars.rect(x, y, w, 10).fill({ color, alpha: alpha * (k < 1 ? 0.35 + 0.5 * k : 1) });
+        this.bars.rect(x, y, w, 3).fill({ color: PALETTE.white, alpha: alpha * 0.25 * k });
       }
     }
   }
@@ -334,8 +354,8 @@ export class Hud {
       v.visible = on;
       if (!on) return;
       v.clear();
-      v.position.set(this.cx + 12 + i * 30, 604);
-      drawGhost(v, 11, { color: s.playerColor, dir: 'left', wave: 4 });
+      v.position.set(this.cx + 13 + i * 32, LIVES_Y + 40);
+      drawGhost(v, 12, { color: s.playerColor, dir: 'left', wave: 4 });
     });
 
     this.pacIcons.forEach((v, i) => {
@@ -343,8 +363,8 @@ export class Hud {
       v.visible = on;
       if (!on) return;
       v.clear();
-      v.position.set(this.cx + 10 + i * 24, 664);
-      drawPacman(v, 9, 0.6, PALETTE.pac);
+      v.position.set(this.cx + Math.round(this.cw * 0.52) + 12 + i * 28, LIVES_Y + 40);
+      drawPacman(v, 11, 0.6, PALETTE.pac);
     });
   }
 
