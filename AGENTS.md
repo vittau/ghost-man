@@ -89,7 +89,10 @@ second copy in the app's `node_modules`.
    its aspect correction and skews the curvature. The shader also normalises
    `vTextureCoord` by `uOutputFrame.zw * uInputSize.zw`: Pixi's pooled filter
    texture can be larger than the frame, and centring on raw coordinates
-   skews the warp.
+   skews the warp. Keep the render resolution at 1 or above
+   (`resolutionFor()` in `main.ts`): below 1, the bloom nested under the CRT
+   pass loses its bottom rows (a background-coloured band across the lower
+   maze). That is also why there is no automatic quality drop.
 6. **The attract-mode demo runs the real simulation** but must never mutate the
    score or the persisted high score. See the `demo` flag in `eatGhost()`.
 7. **The player's ability is only usable in state `'normal'`.** It is locked
@@ -154,8 +157,7 @@ well). WebGL must be available; the renderer is pinned to `preference: 'webgl'`
 because the CRT filter is GLSL-only. Also test with
 `Emulation.setDeviceMetricsOverride({ deviceScaleFactor: 2 })`: a fractional
 render resolution is what exposes filter-texture sizing bugs (skewed CRT,
-resize freezes), and it's slow enough headless to trigger the adaptive
-low-quality downgrade in `main.ts`.
+resize freezes).
 
 For the desktop shell, `npm run desktop` and pass `--remote-debugging-port`
 to Electron to drive it the same way. There's no gamepad in CDP; override

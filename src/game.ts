@@ -1621,14 +1621,6 @@ export class Game {
     return this.music.trackName ? `♪ ${this.music.trackName}` : '';
   }
 
-  /** Called by the bootstrap if the frame rate can't hold up. */
-  setLowQuality(): void {
-    this.bloom = createBloom('low');
-    this.world.filters = [this.bloom];
-    this.crtOn = false;
-    if (this.crt) this.crt.filter.enabled = false;
-  }
-
   /** Re-run every width-dependent layout after a viewport change. */
   layout(): void {
     this.buildBackdrop();

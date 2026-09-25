@@ -4,13 +4,16 @@ import { PALETTE, SCREEN_H, SCREEN_W, setViewportWidth } from './config';
 import { Input } from './input';
 import { Game } from './game';
 
-/** Keep the total pixel count sane so bloom + CRT stay affordable. */
+/**
+ * Keep the total pixel count sane so bloom + CRT stay affordable, but never
+ * below 1: a sub-1 resolution cuts the bottom off the bloom under the CRT.
+ */
 const MAX_PIXELS = 3_200_000;
 
 function resolutionFor(w: number, h: number): number {
   const dpr = window.devicePixelRatio || 1;
   const budget = Math.sqrt(MAX_PIXELS / Math.max(1, w * h));
-  return Math.max(0.7, Math.min(2, dpr, budget));
+  return Math.max(1, Math.min(2, dpr, budget));
 }
 
 /**
@@ -84,7 +87,6 @@ async function boot(): Promise<void> {
 
   const input = new Input();
   const game = new Game(app);
-  let downgraded = false;
   let accMs = 0;
   let frames = 0;
   let fpsReports = 3;
@@ -116,25 +118,16 @@ async function boot(): Promise<void> {
     // No stray pointer over the maze while playing on a controller.
     app.canvas.style.cursor = input.lastDevice === 'gamepad' ? 'none' : '';
 
-    // One-way adaptive quality: drop render resolution and bloom detail rather
-    // than stutter on weaker GPUs.
-    if (!downgraded) {
+    // The first few frame-rate samples go to the desktop shell's launch log.
+    // (There is no automatic quality drop: its sub-1 render resolution broke
+    // the bloom under the CRT pass, and the Deck holds full quality anyway.)
+    if (fpsReports > 0) {
       accMs += ticker.deltaMS;
       frames++;
       if (frames >= 150) {
+        fpsReports--;
         const avgFps = 1000 / (accMs / frames);
-        // The first few samples go to the desktop shell's launch log.
-        if (fpsReports > 0) {
-          fpsReports--;
-          console.info(`[ghost-man] fps ${avgFps.toFixed(1)} at resolution ${app.renderer.resolution}`);
-        }
-        if (avgFps < 45) {
-          downgraded = true;
-          app.renderer.resolution = Math.max(0.7, app.renderer.resolution * 0.75);
-          app.renderer.resize(SCREEN_W, SCREEN_H);
-          game.setLowQuality();
-          game.layout();
-        }
+        console.info(`[ghost-man] fps ${avgFps.toFixed(1)} at resolution ${app.renderer.resolution}`);
         accMs = 0;
         frames = 0;
       }
