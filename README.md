@@ -162,7 +162,9 @@ docs/readme/  this README's art (node docs/readme/generate.mjs)
 
 - **Music:** *Falling Organ*, *Tyranny of the Sun*, *Work in Progress*,
   *Demons on the Beach*, *Solitude* and *The Climax* by **vandalorum**
-  (*Primal Light*), licensed
+  (Primal Light Music), from
+  [Space / Fast Synth / Epic Themes](https://opengameart.org/content/space-fast-synth-epic-themes)
+  on OpenGameArt, licensed
   [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 - **Font:** *Press Start 2P* by CodeMan38, SIL Open Font License.
 

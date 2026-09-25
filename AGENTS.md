@@ -112,8 +112,10 @@ second copy in the app's `node_modules`.
 11. **No minimap.** Deliberate design decision: a board-wide tactical overlay
     lets a good player ignore the maze entirely, which defeats the game. Don't
     add one, or any equivalent whole-board readout.
-12. **Music is CC-BY 4.0** by *vandalorum / Primal Light*. The attribution must
-    remain in `README.md` and on the title screen (`menu.ts`).
+12. **Music is CC-BY 4.0** by *vandalorum / Primal Light*, from OpenGameArt's
+    [Space / Fast Synth / Epic Themes](https://opengameart.org/content/space-fast-synth-epic-themes).
+    The attribution must remain in `README.md` and on the title screen
+    (`menu.ts`).
 13. **Audio needs a user gesture.** Nothing plays until `unlockAudio()` runs from
     a key/pointer handler; the menu surfaces the state via `audioHintText()`.
     The one exception is where autoplay is allowed — the desktop shell turns
