@@ -7,7 +7,7 @@ and pasted back), what was **inferred**, and what is still **open**. None of
 it could be reproduced on the Mac except where noted, so test on a Deck
 before believing a fix.
 
-## The setup that works (v0.1.4)
+## The setup that works (since v0.1.4)
 
 | | Desktop Mode | Gaming Mode |
 | --- | --- | --- |
@@ -221,6 +221,84 @@ override `navigator.getGamepads` over CDP (see AGENTS.md).
 - The launcher ships via `extraFiles`. The binary is renamed with
   `executableName: ghost-man-bin` so the script can take the name
   `ghost-man`, which is what the README tells players to add to Steam.
+
+## Picking up the OpenGL triangle (finding 2)
+
+**Why bother.** If Linux could stay on ANGLE's OpenGL backend, Gaming Mode
+could composite on the GPU again, dropping the per-frame readback of
+finding 4. It is not urgent: the owner reports performance on the Deck as
+great with software compositing.
+
+**How you'll be working.** You cannot reach the Deck. The owner runs
+commands and pastes the output back, or sends a phone photo (HEIC; convert
+it with `sips -s format jpeg <in> --out <out>.jpg` before reading it).
+
+- In Desktop Mode there is **no keyboard**: Steam + X did not bring up the
+  on-screen keyboard, so the in-game `C` (CRT) and `F` (FPS) toggles can't
+  be pressed.
+- Started from Konsole, the controller is keyboard/mouse emulation, and R2
+  steals focus (finding 8).
+- So every test toggle must be settable from the command line.
+- The triangle shows in Desktop Mode (Wayland) under `./ghost-man
+  --use-angle=gl`. Whether it also shows on X11 was never checked; try
+  `--ozone-platform=x11 --disable-gpu-compositing` alongside.
+
+**Toggles to add first (none exist yet).** The page can't see the process's
+arguments, so `electron/main.js` has to forward them. For example, read
+`process.env.GHOST_MAN_DEBUG` and load `app://ghost-man/?debug=<value>`;
+`src/main.ts` then reads it with `new URLSearchParams(location.search)`.
+Log the active toggles with `console.info` so `ghost-man.log` records them.
+Useful toggles:
+
+| Toggle | Change | Side effect |
+| --- | --- | --- |
+| `nobackbuffer` | `useBackBuffer: false` in `app.init` (`src/main.ts`) | the menu's frosted header and panel (`BackdropBlurFilter` in `src/menu.ts`) stop working; fine for a test |
+| `nocrt` | don't install the CRT on `app.stage` (`src/game.ts` constructor) | no curvature or scanlines |
+| `nobloom` | `world.filters = []` | no glow |
+
+Then, in Konsole: `GHOST_MAN_DEBUG=nobackbuffer ./ghost-man --use-angle=gl`,
+start a game, and ask for a photo. Run one toggle per run.
+
+**The suspects, with the Pixi code to read** (Pixi 8.21):
+
+- **The back-buffer present.** `_presentBackBuffer()` in
+  `node_modules/pixi.js/lib/rendering/renderers/gl/GlBackBufferSystem.mjs`
+  draws `bigTriangleGeometry`, one triangle at NDC (-1,-1), (3,-1), (-1,3)
+  that overshoots the screen. The missing region looks like that triangle
+  with its (3,-1) corner landed higher. This is only a guess from the photo.
+- **The CRT pass on `app.stage`.** It uses Pixi's filter quad:
+  `quadGeometry` in `node_modules/pixi.js/lib/filters/FilterSystem.mjs`,
+  with a `Uint32Array` index buffer `[0, 1, 2, 0, 2, 3]`. The shader is in
+  `src/crt-filter.ts`, and it clamps its sampling and writes alpha 1.
+- **Probably not the bloom on `world`.** The HUD, which sits outside
+  `world`, was cut too.
+
+`nobackbuffer` curing it points at the present pass. `nocrt` curing it
+points at the CRT pass. If neither does, look at Chromium's compositor.
+
+**Worth collecting from the Deck:** the Mesa and ANGLE versions. Log
+`app.getGPUInfo('complete')` in place of `'basic'`; it carries the GL
+strings. With a version and a minimal repro, it may be an upstream
+Mesa/ANGLE bug to report rather than ours to fix.
+
+**Before switching Linux back to OpenGL:**
+
+- **OpenGL has never run in Gaming Mode.** v0.1.1, the only GL build that
+  reached it, hung before starting (finding 1).
+- **The launcher can't test GPU compositing today.** It always adds
+  `--disable-gpu-compositing` in Gaming Mode, so give it an opt-out first,
+  e.g. honour `GHOST_MAN_GPU_COMPOSITING=1`. Then test with
+  `GHOST_MAN_GPU_COMPOSITING=1 GHOST_MAN_FLAGS="--use-angle=gl" %command%`.
+- **If GL shows a picture in both modes with no triangle:**
+  - remove the SteamOS Vulkan block in `electron/main.js`;
+  - remove the compositing flag from the launcher;
+  - compare the `[ghost-man] fps` lines before and after;
+  - update AGENTS.md and this file.
+
+**Tooling.** The CDP helper scripts used on the Mac (key presses,
+screenshots, a scripted gamepad) weren't committed. AGENTS.md describes the
+approach; expect to rewrite them. A viewport override dies with its CDP
+session, so run each check in one session.
 
 ## Playbook for the next Deck bug
 
