@@ -105,12 +105,14 @@ export class Maze {
     }
   }
 
+  /** `dotsLeft` counts everything still to eat, power pellets included (as `eat` does). */
   private recount(): void {
     let dots = 0;
     let power = 0;
     for (let i = 0; i < this.dots.length; i++) {
-      if (this.dots[i] === 1) dots++;
-      else if (this.dots[i] === 2) power++;
+      if (this.dots[i] === 0) continue;
+      dots++;
+      if (this.dots[i] === 2) power++;
     }
     this.dotsLeft = dots;
     this.dotsTotal = dots;
