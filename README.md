@@ -1,87 +1,169 @@
-# Ghost-Man
+<p align="center">
+  <img src="docs/readme/banner.svg" alt="Ghost-Man — you are the ghost" width="100%">
+</p>
 
-> An absolutely gorgeous, procedurally-rendered arcade game where **you are the ghost**.
+<p align="center">
+  <a href="https://www.vitormach.dev/ghost-man/"><img src="https://img.shields.io/badge/play-in%20your%20browser-ff3fb0?style=for-the-badge&labelColor=1a0b34" alt="Play in your browser"></a>
+  <a href="https://github.com/vittau/ghost-man/releases/latest"><img src="https://img.shields.io/github/v/release/vittau/ghost-man?style=for-the-badge&label=download&color=00e5ff&labelColor=1a0b34" alt="Download"></a>
+  <a href="https://github.com/sponsors/vittau"><img src="https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white&labelColor=1a0b34" alt="Sponsor"></a>
+</p>
 
-You command a squad of four ghosts hunting an AI Pac-Man through a neon
-vaporwave maze. Pac-Man is smart: he clears dots, grabs power pellets, and
-hunts *you* when he's powered up.
+<p align="center">
+  An arcade game where the tables are turned: <b>you are the ghost</b>.<br>
+  Lead a squad of four through a neon vaporwave maze and corner an AI Pac-Man
+  that clears dots, grabs power pellets and, once he's powered up,
+  <b>hunts you</b>.
+</p>
 
-## Quick start (local testing)
+<p align="center">
+  <img src="docs/gameplay.jpg" alt="Pac-Man powers up and turns on the ghosts" width="100%">
+</p>
+
+## <img src="docs/readme/h-play.svg" alt="Play" width="100%">
+
+**In the browser:** [vitormach.dev/ghost-man](https://www.vitormach.dev/ghost-man/).
+Nothing to install; a keyboard or a controller both work.
+
+**On your machine:** grab the latest build from
+[Releases](https://github.com/vittau/ghost-man/releases/latest).
+
+| System | File |
+| --- | --- |
+| Steam Deck / Linux | `Ghost-Man-…-linux-x86_64.AppImage` |
+| Windows | `Ghost-Man-…-windows-x64-setup.exe` (installer) or `…-portable.exe` |
+| macOS (Apple Silicon) | `Ghost-Man-…-macos-arm64.dmg` |
+| macOS (Intel) | `Ghost-Man-…-macos-x64.dmg` |
+
+The desktop builds start in fullscreen with sound on. **F11** or
+**Alt+Enter** toggles fullscreen, and **QUIT GAME** is on the pause screen.
+
+> [!NOTE]
+> The builds aren't signed with a paid certificate, so the OS asks once
+> before the first launch.
+>
+> - **macOS** says it can't verify the app. Open **System Settings →
+>   Privacy & Security**, scroll to the Ghost-Man notice and click **Open
+>   Anyway**. From a terminal:
+>   `xattr -dr com.apple.quarantine /Applications/Ghost-Man.app`
+> - **Windows** SmartScreen shows "Windows protected your PC". Click
+>   **More info → Run anyway**.
+
+## <img src="docs/readme/h-steam-deck.svg" alt="Steam Deck" width="100%">
+
+The game is laid out for the Deck's 1280×800 screen and reads the controller
+directly, with no Steam Input template needed.
+
+1. Switch to **Desktop Mode** (Steam button → Power → Switch to Desktop).
+2. Download the `.AppImage` from
+   [Releases](https://github.com/vittau/ghost-man/releases/latest).
+3. In the file manager, right-click it → **Properties → Permissions** →
+   tick **Is executable**.
+4. Right-click it again → **Add to Steam**. (Or, in Steam: *Games → Add a
+   Non-Steam Game to My Library…* and browse to the file.)
+5. Head back to **Gaming Mode**. Ghost-Man is in your library under
+   *Non-Steam*.
+
+If the buttons act like a keyboard, open the game's controller settings and
+pick the **Gamepad** layout. To leave, use **QUIT GAME** on the pause screen
+or the Steam button → *Exit game*.
+
+## <img src="docs/readme/h-controls.svg" alt="Controls" width="100%">
+
+The on-screen hints follow whichever device you touched last.
+
+| Action | Keyboard | Controller |
+| --- | --- | --- |
+| Move | Arrows / WASD | D-pad / left stick |
+| Start | Space / Enter | A |
+| Squad stance | `1`–`4`, `Q` / `E` to cycle | L1 / R1 |
+| Signature ability | Shift | A / R2 |
+| Pause | `P` / Esc | Menu ☰ |
+| Next song | `M` | Y |
+| Mute | `N` | View ⧉ |
+| CRT effect / FPS readout | `C` / `F` | — |
+
+<p align="center">
+  <img src="docs/title-screen.jpg" alt="Title screen: pick your ghost" width="100%">
+</p>
+
+## <img src="docs/readme/h-squad.svg" alt="The squad" width="100%">
+
+Pick your ghost on the title screen. The other three follow your orders.
+
+| Ghost | Ability |
+| --- | --- |
+| **Blinky** | *Shadow Dash*: a burst of raw speed |
+| **Pinky** | *Warp*: jump straight to the end of the corridor ahead |
+| **Inky** | *Phase*: slip through one wall |
+| **Clyde** | *Blindside*: Pac-Man loses his bearings and wanders blind for 2.5 s |
+
+| Stance | What your teammates do |
+| --- | --- |
+| **HUNT** | Classic chase |
+| **AMBUSH** | Cut him off ahead |
+| **FLANK** | Take his escape route |
+| **GUARD** | Camp the power pellets |
+
+## <img src="docs/readme/h-rules.svg" alt="Rules" width="100%">
+
+- Catch Pac-Man **three times** to clear a level.
+- If Pac-Man clears the maze, it's **game over** on the spot.
+- A power pellet turns the tables: Pac-Man hunts, and he goes for *you*
+  first. Your ability is locked until you recover.
+- Get eaten and you lose a life, then drive your eyes back to the house.
+  You earn a life back every 2,000 points (up to five).
+
+## <img src="docs/readme/h-build.svg" alt="Build it" width="100%">
+
+PixiJS 8 + Vite + TypeScript, with Electron for the desktop builds. Needs
+**Node 24** (see `.nvmrc`).
 
 ```bash
 npm install
-npm run dev
+npm run dev        # dev server at http://localhost:5173/ (or just `make`)
 ```
-
-Then open **http://localhost:5173/** — it opens automatically.
-
-Even shorter, if you have `make`:
-
-```bash
-make        # installs deps and starts the dev server
-```
-
-Other scripts:
 
 | Command | What it does |
 | --- | --- |
 | `npm run dev` / `npm start` | Vite dev server with hot reload |
 | `npm run typecheck` | TypeScript check, no emit |
-| `npm run build` | Type-check + production build into `dist/` |
-| `npm run preview` | Serve the production build locally on :4173 |
+| `npm run build` | Type-check + production web build into `dist/` |
+| `npm run preview` | Serve the production build on :4173 |
+| `npm run desktop` | Build, then run the game in the Electron shell |
+| `npm run dist` | Package the desktop app for this OS into `release/` |
+| `make deploy` | Publish the web build to GitHub Pages |
 
-## Controls
+**Releases** are built by CI. Bump the version and push the tag;
+[`release.yml`](.github/workflows/release.yml) builds Linux, Windows and
+macOS in parallel and publishes them, with checksums, as a GitHub release:
 
-| Key | Action |
-| --- | --- |
-| Arrows / WASD | Move your ghost |
-| `1`–`4` | Squad stance: HUNT / AMBUSH / FLANK / GUARD |
-| `Q` / `E` | Cycle stance |
-| `Shift` | Signature ability (depends on your ghost) |
-| `P` / `Esc` | Pause |
-| `M` | Skip to the next song (in game) |
-| `C` | Toggle the CRT effect |
-| `F` | Toggle the FPS readout |
-| `N` | Mute / unmute |
-
-## The four ghosts
-
-| Ghost | Ability |
-| --- | --- |
-| **Blinky** | *Shadow Dash* — burst of speed |
-| **Pinky** | *Warp* — jump straight to the end of the corridor ahead |
-| **Inky** | *Phase* — slip through walls |
-| **Clyde** | *Blindside* — Pac-Man loses his bearings and wanders blindly for two and a half seconds |
-
-## Rules
-
-Catch Pac-Man three times to clear a level. You lose a life each time Pac-Man
-eats your ghost, and earn one back every 2,000 points (up to five). If Pac-Man
-clears the maze, it's game over on the spot.
-
-## Deploying
-
-`npm run build` emits a fully static bundle to `dist/`, already configured with
-the `/gorgeous-ghost-man/` base path for **vitormach.dev/gorgeous-ghost-man/**.
-Drop `dist/` on any static host.
-
-## Architecture
-
-```
-src/
-  main.ts      boot: Pixi app, resize, game loop
-  game.ts      state machine, rules, orchestration
-  config.ts    dimensions, vaporwave palette, maze layout, roster
-  types.ts     shared types + direction tables
-  maze.ts      tile grid, pellet layer, BFS distance fields
-  mover.ts     grid-locked, drift-free movement
-  actors.ts    Pac-Man + ghost simulation and AI
-  draw.ts      procedural vector art (Pac-Man, ghosts, pellets)
-  filters.ts   bloom + CRT post-processing
-  fx.ts        particles, popups, screen shake, flash
-  audio.ts     procedural WebAudio synth (SFX + music)
-  hud.ts       in-game HUD
-  menu.ts      attract-mode title screen + ghost select
+```bash
+npm version 0.2.0 && git push --follow-tags
 ```
 
-Everything is drawn from code — no sprite sheets, no binary assets.
+Everything on screen is drawn from code: no sprite sheets, no image
+assets. See [`AGENTS.md`](AGENTS.md) for the architecture and the rules
+that keep the game working.
+
+```
+src/          the game (Pixi app, simulation, AI, rendering, audio, input)
+electron/     desktop shell: window, app:// file server, quit bridge
+docs/readme/  this README's art (node docs/readme/generate.mjs)
+```
+
+## <img src="docs/readme/h-credits.svg" alt="Credits" width="100%">
+
+- **Music:** *Falling Organ*, *Tyranny of the Sun*, *Work in Progress*,
+  *Demons on the Beach*, *Solitude* and *The Climax* by **vandalorum**
+  (*Primal Light*), licensed
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- **Font:** *Press Start 2P* by CodeMan38, SIL Open Font License.
+
+## <img src="docs/readme/h-support.svg" alt="Support" width="100%">
+
+Ghost-Man is free and always will be. If it gave you a good chase, you
+can keep the ghosts stocked with power pellets:
+
+<p align="center">
+  <a href="https://github.com/sponsors/vittau"><img src="https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white&labelColor=1a0b34" alt="Sponsor"></a>
+</p>
