@@ -55,13 +55,6 @@ protocol.registerSchemesAsPrivileged([
 // music at boot instead of asking for a key press (see autoplayAllowed()).
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
-// Steam Deck's Gaming Mode (gamescope) hosts games on XWayland. Pin X11 so a
-// stray WAYLAND_DISPLAY doesn't send Chromium to a compositor it can't use;
-// `--ozone-platform=wayland` on the command line still overrides this.
-if (process.platform === 'linux' && !app.commandLine.hasSwitch('ozone-platform')) {
-  app.commandLine.appendSwitch('ozone-platform', 'x11');
-}
-
 // SteamOS: WebGL through ANGLE's Vulkan backend (RADV). Its default OpenGL
 // backend drops part of the final full-screen pass on the Deck, leaving a
 // black triangle in the lower right. Other Linux keeps Chromium's default;
@@ -77,12 +70,6 @@ if (process.platform === 'linux' && isSteamOS() && !app.commandLine.hasSwitch('u
   app.commandLine.appendSwitch('use-angle', 'vulkan');
   app.commandLine.appendSwitch('enable-features', 'Vulkan,VulkanFromANGLE,DefaultANGLEVulkan');
   log('SteamOS: ANGLE on Vulkan');
-}
-
-// One game at a time: a second launch focuses the running window.
-if (!app.requestSingleInstanceLock()) {
-  log('another instance is running; quitting');
-  app.quit();
 }
 
 app.on('child-process-gone', (_event, details) => log('child process gone', details));
@@ -153,13 +140,6 @@ function createWindow() {
   void win.loadURL(`${ORIGIN}/`);
   return win;
 }
-
-app.on('second-instance', () => {
-  const [win] = BrowserWindow.getAllWindows();
-  if (!win) return;
-  if (win.isMinimized()) win.restore();
-  win.focus();
-});
 
 app.on('window-all-closed', () => app.quit());
 

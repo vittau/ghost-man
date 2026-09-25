@@ -21,5 +21,21 @@ unset LD_PRELOAD LD_LIBRARY_PATH
 if [ -n "${SteamGameId-}" ]; then
   set -- --no-sandbox "$@"
   echo "started by Steam: --no-sandbox" >> "$log"
+  # Gaming Mode (gamescope, X11 only): Chromium presents GPU-composited
+  # frames through a Vulkan swapchain that never reaches the screen there —
+  # the game runs, the display stays black. Composite in software instead;
+  # WebGL still renders on the GPU.
+  if [ -z "${WAYLAND_DISPLAY-}" ]; then
+    set -- --disable-gpu-compositing "$@"
+    echo "gamescope: --disable-gpu-compositing" >> "$log"
+  fi
 fi
+# Extra Chromium flags for testing, e.g. Steam launch options
+# `GHOST_MAN_FLAGS="--use-angle=gl" %command%` (split on spaces).
+if [ -n "${GHOST_MAN_FLAGS-}" ]; then
+  # shellcheck disable=SC2086
+  set -- "$@" $GHOST_MAN_FLAGS
+  echo "GHOST_MAN_FLAGS: $GHOST_MAN_FLAGS" >> "$log"
+fi
+echo "exec ghost-man-bin $*" >> "$log"
 exec "$here/ghost-man-bin" "$@" >> "$log" 2>&1

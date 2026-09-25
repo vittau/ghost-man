@@ -87,6 +87,7 @@ async function boot(): Promise<void> {
   let downgraded = false;
   let accMs = 0;
   let frames = 0;
+  let fpsReports = 3;
 
   const fit = (): void => {
     setViewportWidth(widthForWindow());
@@ -122,6 +123,11 @@ async function boot(): Promise<void> {
       frames++;
       if (frames >= 150) {
         const avgFps = 1000 / (accMs / frames);
+        // The first few samples go to the desktop shell's launch log.
+        if (fpsReports > 0) {
+          fpsReports--;
+          console.info(`[ghost-man] fps ${avgFps.toFixed(1)} at resolution ${app.renderer.resolution}`);
+        }
         if (avgFps < 45) {
           downgraded = true;
           app.renderer.resolution = Math.max(0.7, app.renderer.resolution * 0.75);
