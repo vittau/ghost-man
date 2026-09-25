@@ -42,7 +42,8 @@ import { createBloom, createCRT } from './filters';
 import type { CrtResult } from './filters';
 import { DIRS } from './types';
 import type { Dir, GamePhase, GhostId, Stance, TilePos, UnitDir } from './types';
-import type { Input } from './input';
+import type { Input, InputDevice } from './input';
+import { desktop } from './desktop';
 import { MusicPlayer } from './music';
 import { lattice, valueNoise } from './noise';
 
@@ -53,6 +54,9 @@ import levelTrack2 from './assets/audio/03-work-in-progress.mp3';
 import levelTrack3 from './assets/audio/04-demons-on-the-beach.mp3';
 import levelTrack4 from './assets/audio/05-solitude.mp3';
 import levelTrack5 from './assets/audio/06-the-climax.mp3';
+
+/** Pause-screen entries: only the desktop build can quit from inside the game. */
+const PAUSE_ITEMS: readonly string[] = desktop ? ['RESUME', 'QUIT GAME'] : [];
 
 /** Title-screen demo camera: tiles visible top to bottom, and seconds per ghost. */
 const DEMO_TILES_TALL = 11;
@@ -181,6 +185,10 @@ export class Game {
   private trailClock = 0;
   private pacAngle = dirAngle('left', Math.PI);
   private muted = false;
+  /** Last device the player used; prompts and hints are worded for it. */
+  private device: InputDevice = 'keyboard';
+  /** Highlighted entry of the pause menu (desktop build only). */
+  private pauseSelect = 0;
   private lastFps = 60;
   private message = '';
   private submessage = '';
@@ -815,14 +823,15 @@ export class Game {
   update(dt: number, input: Input): void {
     this.elapsed += dt;
     this.lastFps = 1 / Math.max(0.0001, dt);
+    this.device = input.lastDevice;
 
-    if (input.justPressed('KeyM')) {
+    if (input.pressed('nextSong')) {
       this.music.cycle();
       this.audio.uiSelect();
     }
     if (input.justPressed('KeyC')) this.toggleCRT();
     if (input.justPressed('KeyF')) this.toggleFps();
-    if (input.justPressed('KeyN')) {
+    if (input.pressed('mute')) {
       this.muted = this.audio.toggleMute();
       this.music.setMuted(this.muted);
     }
@@ -847,10 +856,7 @@ export class Game {
         this.updateLevelClear(sdt);
         break;
       case 'paused':
-        if (input.anyPressed('KeyP', 'Escape', 'Space')) {
-          this.phase = 'playing';
-          this.music.setDucked(false);
-        }
+        this.updatePaused(input);
         break;
     }
 
@@ -863,12 +869,37 @@ export class Game {
     input.clearPresses();
   }
 
+  private updatePaused(input: Input): void {
+    const items = PAUSE_ITEMS;
+    let resume = input.pressed('pause') || input.pressed('back');
+    if (items.length) {
+      const step = (input.pressed('down') ? 1 : 0) - (input.pressed('up') ? 1 : 0);
+      if (step) {
+        this.pauseSelect = (this.pauseSelect + step + items.length) % items.length;
+        this.audio.uiSelect();
+      }
+      if (!resume && input.pressed('confirm')) {
+        if (items[this.pauseSelect] === 'QUIT GAME') {
+          desktop?.quit();
+          return;
+        }
+        resume = true;
+      }
+    } else if (input.pressed('confirm')) {
+      resume = true;
+    }
+    if (resume) {
+      this.phase = 'playing';
+      this.music.setDucked(false);
+    }
+  }
+
   private updateAttract(dt: number, input: Input): void {
-    if (input.anyPressed('ArrowUp', 'KeyW')) {
+    if (input.pressed('up')) {
       this.selectGhost(this.menuSelect - 1);
       this.audio.uiSelect();
     }
-    if (input.anyPressed('ArrowDown', 'KeyS')) {
+    if (input.pressed('down')) {
       this.selectGhost(this.menuSelect + 1);
       this.audio.uiSelect();
     }
@@ -878,7 +909,7 @@ export class Game {
         this.audio.uiSelect();
       }
     }
-    if (input.anyPressed('Space', 'Enter', 'NumpadEnter')) {
+    if (input.pressed('confirm')) {
       this.startGame();
       return;
     }
@@ -915,6 +946,7 @@ export class Game {
       this.phase === 'gameover' ? 'gameover' : 'menu',
       this.audioHintText(),
       this.muted,
+      this.device,
     );
     this.hud.layer.visible = false;
   }
@@ -946,11 +978,12 @@ export class Game {
     if (input.justPressed('Digit2')) this.setStance('ambush');
     if (input.justPressed('Digit3')) this.setStance('flank');
     if (input.justPressed('Digit4')) this.setStance('guard');
-    if (input.anyPressed('KeyE')) this.cycleStance(1);
-    if (input.anyPressed('KeyQ')) this.cycleStance(-1);
-    if (input.anyPressed('ShiftLeft', 'ShiftRight')) this.useAbility();
-    if (input.anyPressed('KeyP', 'Escape')) {
+    if (input.pressed('stanceNext')) this.cycleStance(1);
+    if (input.pressed('stancePrev')) this.cycleStance(-1);
+    if (input.pressed('ability')) this.useAbility();
+    if (input.pressed('pause')) {
       this.phase = 'paused';
+      this.pauseSelect = 0;
       this.music.setDucked(true);
       return;
     }
@@ -1554,7 +1587,9 @@ export class Game {
             : this.message,
       submessage:
         this.phase === 'paused'
-          ? 'PRESS P TO RESUME'
+          ? PAUSE_ITEMS.length
+            ? ''
+            : `PRESS ${this.device === 'gamepad' ? 'MENU' : 'P'} TO RESUME`
           : banner
             ? pg && pg.state === 'eaten'
               ? 'DRIVE BACK TO THE HOUSE'
@@ -1566,6 +1601,9 @@ export class Game {
           : banner
             ? PALETTE.danger
             : this.messageColor,
+      pauseItems: this.phase === 'paused' ? PAUSE_ITEMS : [],
+      pauseSelect: this.pauseSelect,
+      device: this.device,
       muted: this.muted,
       trackName: this.audioHintText(),
       showFps: this.showFps,
@@ -1576,7 +1614,7 @@ export class Game {
   /** Menu/HUD line describing the audio state, so silence is never a mystery. */
   private audioHintText(): string {
     if (!this.music.available) return '';
-    if (this.muted) return 'SOUND MUTED  ·  N TO UNMUTE';
+    if (this.muted) return `SOUND MUTED  ·  ${this.device === 'gamepad' ? 'VIEW' : 'N'} TO UNMUTE`;
     if (!this.music.unlockedFlag) {
       return this.music.buffered ? 'PRESS ANY KEY FOR SOUND' : 'LOADING AUDIO…';
     }

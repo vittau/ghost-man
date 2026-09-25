@@ -13,6 +13,7 @@ import {
 } from './config';
 import { drawGhost, drawPacman } from './draw';
 import { lerpColor } from './color';
+import type { InputDevice } from './input';
 import type { Stance } from './types';
 
 export interface HudState {
@@ -36,6 +37,10 @@ export interface HudState {
   message: string;
   submessage: string;
   messageColor: number;
+  /** Pause menu entries (empty when there is no menu), and the highlighted one. */
+  pauseItems: readonly string[];
+  pauseSelect: number;
+  device: InputDevice;
   muted: boolean;
   trackName: string;
   showFps: boolean;
@@ -51,6 +56,14 @@ const GHOST_BOX_H = 118;
 const ABILITY_BAR_Y = 344;
 const ABILITY_GLOW_MS = 900;
 const LIVES_Y = 512;
+const PAUSE_ITEM_Y = 392;
+const PAUSE_ITEM_GAP = 30;
+
+/** Panel hints, worded for the device in use. */
+const HINTS: Record<InputDevice, { ability: string; line1: string; line2: string }> = {
+  keyboard: { ability: 'SHIFT', line1: '1-4 STANCE  P PAUSE', line2: 'M MUSIC  C CRT' },
+  gamepad: { ability: 'A', line1: 'L1/R1 STANCE  MENU PAUSE', line2: 'Y MUSIC  VIEW MUTE' },
+};
 
 const mkText = (
   text: string,
@@ -107,6 +120,9 @@ export class Hud {
 
   private readonly message = mkText('', 34, PALETTE.gold, 'center');
   private readonly submessage = mkText('', 14, PALETTE.text, 'center');
+  private readonly pauseItems = [0, 1].map(() => mkText('', 14, PALETTE.text, 'center'));
+  /** Backing card for the pause menu, so its entries read over the maze. */
+  private readonly pauseBack = new Graphics();
   private readonly frightBar = new Graphics();
 
   private panelX = 0;
@@ -164,8 +180,10 @@ export class Hud {
       this.keyHint2,
       this.trackText,
       this.lifeLayer,
+      this.pauseBack,
       this.message,
       this.submessage,
+      ...this.pauseItems,
       ...this.stanceNames,
       ...this.stanceDescs,
       ...this.barsKeyLabels,
@@ -238,6 +256,15 @@ export class Hud {
 
     this.message.position.set(VIEW_W / 2, 330);
     this.submessage.position.set(VIEW_W / 2, 378);
+    this.pauseItems.forEach((t, i) => t.position.set(VIEW_W / 2, PAUSE_ITEM_Y + i * PAUSE_ITEM_GAP));
+    const cardW = 380;
+    const cardTop = 300;
+    const cardBottom = PAUSE_ITEM_Y + this.pauseItems.length * PAUSE_ITEM_GAP + 16;
+    this.pauseBack.clear();
+    this.pauseBack
+      .roundRect(VIEW_W / 2 - cardW / 2, cardTop, cardW, cardBottom - cardTop, 12)
+      .fill({ color: PALETTE.bgDeep, alpha: 0.88 })
+      .stroke({ width: 1.5, color: PALETTE.accent2, alpha: 0.55 });
   }
 
   /** Light up the ability meter: it just became usable again. */
@@ -259,7 +286,10 @@ export class Hud {
     this.abilityValue.text = s.abilityName;
     this.abilityValue.style.fill = s.abilityReady ? PALETTE.gold : PALETTE.textDim;
     this.abilityValue.scale.set(1 + 0.18 * this.abilityGlow());
-    this.abilityLabel.text = s.abilityLocked ? 'ABILITY LOCKED' : 'ABILITY [SHIFT]';
+    const hints = HINTS[s.device];
+    this.abilityLabel.text = s.abilityLocked ? 'ABILITY LOCKED' : `ABILITY [${hints.ability}]`;
+    this.keyHint1.text = hints.line1;
+    this.keyHint2.text = hints.line2;
     this.abilityLabel.style.fill = s.abilityLocked ? PALETTE.danger : PALETTE.textDim;
     // Already formatted (and ♪-prefixed) by Game.audioHintText().
     this.trackText.text = s.trackName;
@@ -272,6 +302,13 @@ export class Hud {
     this.message.text = s.message;
     this.message.style.fill = s.messageColor;
     this.submessage.text = s.submessage;
+    this.pauseBack.visible = s.pauseItems.length > 0;
+    this.pauseItems.forEach((t, i) => {
+      const item = s.pauseItems[i];
+      const active = i === s.pauseSelect;
+      t.text = item ? (active ? `> ${item} <` : item) : '';
+      t.style.fill = active ? PALETTE.gold : PALETTE.textDim;
+    });
 
     this.drawStances(s);
     this.drawMeters(s);

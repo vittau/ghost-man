@@ -22,6 +22,30 @@ function widthForWindow(): number {
   return Math.round(SCREEN_H * aspect);
 }
 
+/**
+ * True where audio may start without a user gesture: the desktop build turns
+ * the autoplay policy off. Browsers keep a fresh AudioContext suspended, and
+ * a blocked resume() never settles, hence the timeout.
+ */
+async function autoplayAllowed(): Promise<boolean> {
+  try {
+    const ctx = new AudioContext();
+    const ok =
+      ctx.state === 'running' ||
+      (await Promise.race([
+        ctx.resume().then(
+          () => true,
+          () => false,
+        ),
+        new Promise<boolean>((r) => setTimeout(() => r(false), 250)),
+      ]));
+    void ctx.close();
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 async function boot(): Promise<void> {
   try {
     await document.fonts.load('16px "Press Start 2P"');
@@ -77,10 +101,16 @@ async function boot(): Promise<void> {
   };
   window.addEventListener('keydown', unlock);
   window.addEventListener('pointerdown', unlock);
+  void autoplayAllowed().then((ok) => {
+    if (ok) unlock();
+  });
 
   app.ticker.add((ticker) => {
     const dt = Math.min(0.05, ticker.deltaMS / 1000);
+    input.poll();
     game.update(dt, input);
+    // No stray pointer over the maze while playing on a controller.
+    app.canvas.style.cursor = input.lastDevice === 'gamepad' ? 'none' : '';
 
     // One-way adaptive quality: drop render resolution and bloom detail rather
     // than stutter on weaker GPUs.

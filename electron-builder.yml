@@ -1,0 +1,64 @@
+# Desktop packaging. `npm run dist` builds for the current OS; CI builds all
+# three on tag push (.github/workflows/release.yml). Each OS has its own job
+# and its own section below, so a platform can move to another shell later
+# without touching the others.
+appId: dev.vitormach.ghostman
+productName: Ghost-Man
+copyright: Copyright © 2026 Vitor
+directories:
+  output: release
+  buildResources: build
+# Only the Vite bundle and the shell ship; the game's npm deps are already
+# bundled into dist/ (they're devDependencies for that reason).
+files:
+  - dist/**
+  - electron/**
+  - package.json
+asar: true
+# Chromium dominates the package size; trim what the game never uses. The UI
+# is English-only, so one locale is enough.
+electronLanguages: [en-US]
+compression: maximum
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  onlyLoadAppFromAsar: true
+  grantFileProtocolExtraPrivileges: false
+
+linux:
+  # Steam Deck: add the AppImage as a Non-Steam Game from Desktop Mode.
+  target:
+    - target: AppImage
+      arch: [x64]
+  category: Game
+  executableName: ghost-man
+  syncDesktopName: true
+  synopsis: Arcade game where you are the ghost
+  artifactName: Ghost-Man-${version}-linux-${arch}.${ext}
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+nsis:
+  artifactName: Ghost-Man-${version}-windows-${arch}-setup.${ext}
+portable:
+  artifactName: Ghost-Man-${version}-windows-${arch}-portable.${ext}
+
+mac:
+  target:
+    # One DMG per architecture: a universal build doubles the download.
+    - target: dmg
+      arch: [arm64, x64]
+  category: public.app-category.arcade-games
+  # Ad-hoc signature: no Apple Developer ID yet, so Gatekeeper asks the player
+  # to confirm the first launch. Hardened runtime needs a real identity.
+  identity: '-'
+  hardenedRuntime: false
+  artifactName: Ghost-Man-${version}-macos-${arch}.${ext}
+
+publish: null

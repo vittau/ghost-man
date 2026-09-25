@@ -6,8 +6,9 @@ Guidance for agents and contributors working in this repository.
 
 **Ghost-Man** — a browser arcade game. You play as one of four ghosts hunting an
 AI-controlled Pac-Man, and you command your three AI teammates with squad
-stances. Built with **PixiJS v8 + Vite + TypeScript**. All art is drawn
-procedurally in code; there are no sprite sheets.
+stances. Built with **PixiJS v8 + Vite + TypeScript**, shipped on the web and
+as an **Electron** desktop app (Steam Deck/Linux first, plus Windows and
+macOS). All art is drawn procedurally in code; there are no sprite sheets.
 
 ## Commands
 
@@ -17,7 +18,13 @@ npm run dev          # dev server at http://localhost:5173/  (alias: npm start, 
 npm run typecheck    # tsc --noEmit
 npm run build        # typecheck + production build into dist/
 npm run preview      # serve the production build on :4173
+npm run desktop      # build, then run it in the Electron shell (make desktop)
+npm run dist         # package the desktop app for this OS into release/
 ```
+
+Node 24 (`.nvmrc`). The game's npm packages are `devDependencies` on purpose:
+Vite bundles them into `dist/`, and electron-builder would otherwise ship a
+second copy in the app's `node_modules`.
 
 `npm run dev` serves at the root URL. `make deploy` publishes to GitHub Pages
 (see Deploying).
@@ -41,10 +48,15 @@ npm run preview      # serve the production build on :4173
 | `src/music.ts` | Bundled MP3 playback, pre-buffering, ducking |
 | `src/hud.ts` | Right-hand panel (score, squad orders, ability, lives) |
 | `src/menu.ts` | Attract screen: sunset, wireframe terrain + mountains, ghost select |
-| `src/input.ts` | Keyboard state + edge detection |
+| `src/input.ts` | Keyboard + gamepad state, command bindings, last-used device |
+| `src/desktop.ts` | Hooks the desktop shell exposes (quit); absent on the web |
 | `src/color.ts` | Colour blending helpers |
 | `src/noise.ts` | Value noise (wall texture, menu terrain) |
 | `src/style.css` | Page shell, bundled font, full-bleed canvas |
+| `electron/main.js` | Desktop shell: window, `app://` file server, switches |
+| `electron/preload.cjs` | Sandboxed bridge behind `src/desktop.ts` |
+| `electron-builder.yml` | Desktop packaging, one section per OS |
+| `docs/readme/generate.mjs` | Renders the README banner and section headers |
 
 ## Invariants — please don't break these
 
@@ -52,7 +64,9 @@ npm run preview      # serve the production build on :4173
    `Graphics`/`draw.ts`. The only binary assets are the music, the font and
    the favicon PNGs (`public/favicon-32.png`, `public/apple-touch-icon.png`),
    which are renders of `public/favicon.svg` for Safari, which ignores SVG
-   favicons. Re-render them if the SVG changes.
+   favicons, and `build/icon.png`, a 1024px render of the same SVG that
+   electron-builder turns into the app icons. Re-render them if the SVG
+   changes. `docs/` holds the README's screenshots and art; none of it ships.
 2. **Movement uses the tile+progress model** (`Mover`): an actor sits between the
    centre of tile `(tx,ty)` and `(tx,ty)+dir` at progress `t ∈ [0,1]`, and the
    pixel position is a pure function of those. This is what makes turning exact
@@ -99,6 +113,14 @@ npm run preview      # serve the production build on :4173
     remain in `README.md` and on the title screen (`menu.ts`).
 13. **Audio needs a user gesture.** Nothing plays until `unlockAudio()` runs from
     a key/pointer handler; the menu surfaces the state via `audioHintText()`.
+    The one exception is where autoplay is allowed — the desktop shell turns
+    the policy off — which `autoplayAllowed()` in `main.ts` detects to unlock
+    at boot. Don't bypass the check on the web.
+14. **Every command works on keyboard and controller.** Game code reads
+    `input.pressed(action)`, never raw key codes (bar the keyboard-only
+    toggles `C`/`F`/digits). A new command gets bindings in both tables in
+    `input.ts`, and any text that names a key has a gamepad wording picked
+    by `input.lastDevice` (menu `CONTROLS`, HUD `HINTS`, prompts).
 
 ## Conventions
 
@@ -116,6 +138,9 @@ npm run preview      # serve the production build on :4173
 - `npm run build` runs `tsc --noEmit` first and the project is strict
   (`noUnusedLocals`, `noUnusedParameters`), so unused imports fail the build.
 
+- **Controller labels follow the Steam Deck** (Xbox layout under Steam
+  Input): A/B/X/Y, L1/R1, L2/R2, VIEW ⧉, MENU ☰.
+
 ## Verifying changes
 
 ```bash
@@ -132,6 +157,10 @@ render resolution is what exposes filter-texture sizing bugs (skewed CRT,
 resize freezes), and it's slow enough headless to trigger the adaptive
 low-quality downgrade in `main.ts`.
 
+For the desktop shell, `npm run desktop` and pass `--remote-debugging-port`
+to Electron to drive it the same way. There's no gamepad in CDP; override
+`navigator.getGamepads` from `Runtime.evaluate` with a scripted pad object.
+
 ## Deploying
 
 `npm run build` emits a static bundle in `dist/` with a relative base
@@ -147,4 +176,26 @@ commits `dist/` onto the `gh-pages` branch; GitHub Pages serves it at
   must still find the bundle it references. Don't switch it to a fresh
   force-pushed branch.
 
-The same bundle can be wrapped in Tauri or Electron for a desktop build.
+## Desktop builds and releases
+
+The Electron shell (`electron/main.js`) loads the same `dist/` bundle:
+
+- It serves `dist/` over a privileged `app://ghost-man` scheme, never
+  `file://`: fetch, `<audio>` range requests and a stable localStorage origin
+  (the high score) depend on it. The `grantFileProtocolExtraPrivileges` fuse
+  is off accordingly.
+- On Linux it pins `--ozone-platform=x11`: Steam Deck's Gaming Mode
+  (gamescope) hosts games on XWayland.
+- The renderer is sandboxed with context isolation; its only link to the
+  shell is `window.ghostDesktop` from `preload.cjs` (CommonJS, as sandboxed
+  preloads must be). Anything desktop-only checks `desktop` first.
+- Electron is chosen over Tauri for Chromium's WebGL and media stack on
+  Linux (Tauri would use WebKitGTK there). Chromium is most of the ~120 MB
+  download; `electronLanguages` and per-arch DMGs trim what can be trimmed.
+
+`npm version X.Y.Z && git push --follow-tags` releases:
+`.github/workflows/release.yml` builds one job per OS (AppImage for the Deck,
+NSIS + portable for Windows, arm64 + x64 DMGs for macOS), stamps the tag's
+version with `-c.extraMetadata.version`, and publishes a GitHub release with
+`SHA256SUMS.txt`. The builds are unsigned (macOS ad-hoc), so the README
+explains the Gatekeeper and SmartScreen prompts.

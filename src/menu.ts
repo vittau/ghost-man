@@ -14,6 +14,7 @@ import {
 import { SKIRT_RATE, drawGhost } from './draw';
 import { valueNoise } from './noise';
 import type { GhostDef } from './config';
+import type { InputDevice } from './input';
 
 const SKY_STOPS = [SKY.top, SKY.upper, SKY.mid, SKY.lower, SKY.horizon];
 const SUN_STOPS = [PALETTE.sunTop, PALETTE.sunMid, PALETTE.sunBot];
@@ -93,14 +94,27 @@ const chromeFill = (): FillGradient =>
     ],
   });
 
-const CONTROLS: Array<[string, string]> = [
-  ['ARROWS/WASD', 'MOVE'],
-  ['1-4 / Q E', 'SQUAD STANCE'],
-  ['SHIFT', 'ABILITY'],
-  ['P / ESC', 'PAUSE'],
-  ['M', 'NEXT SONG'],
-  ['C / F / N', 'CRT/FPS/MUTE'],
-];
+/** Controls legend for the device in use; both tables have the same rows. */
+const CONTROLS: Record<InputDevice, Array<[string, string]>> = {
+  keyboard: [
+    ['ARROWS/WASD', 'MOVE'],
+    ['1-4 / Q E', 'SQUAD STANCE'],
+    ['SHIFT', 'ABILITY'],
+    ['P / ESC', 'PAUSE'],
+    ['M', 'NEXT SONG'],
+    ['C / F / N', 'CRT/FPS/MUTE'],
+  ],
+  gamepad: [
+    ['D-PAD/STICK', 'MOVE'],
+    ['L1 / R1', 'SQUAD STANCE'],
+    ['A / R2', 'ABILITY'],
+    ['MENU', 'PAUSE'],
+    ['Y', 'NEXT SONG'],
+    ['VIEW', 'MUTE'],
+  ],
+};
+
+const START_BUTTON: Record<InputDevice, string> = { keyboard: 'SPACE', gamepad: 'A' };
 
 interface Peak {
   x: number;
@@ -231,7 +245,7 @@ export class Menu {
       this.rows.push({ def, box, ghost, name, ability, desc });
     });
 
-    CONTROLS.forEach(([key, action]) => {
+    CONTROLS.keyboard.forEach(([key, action]) => {
       const k = mkText(key, 10, PALETTE.gold);
       const a = mkText(action, 10, PALETTE.text);
       this.controlsKeys.push(k);
@@ -332,6 +346,7 @@ export class Menu {
     phase: 'menu' | 'gameover',
     audioHint = '',
     muted = false,
+    device: InputDevice = 'keyboard',
   ): void {
     this.t += dt;
 
@@ -344,9 +359,14 @@ export class Menu {
     this.prompt.alpha = 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(this.t * 4));
     this.subtitle.text = phase === 'gameover' ? 'GAME OVER' : 'YOU ARE THE GHOST';
     this.subtitle.style.fill = phase === 'gameover' ? PALETTE.danger : PALETTE.textDim;
-    this.prompt.text = phase === 'gameover' ? 'PRESS SPACE TO PLAY AGAIN' : 'PRESS SPACE TO START';
+    const start = START_BUTTON[device];
+    this.prompt.text = phase === 'gameover' ? `PRESS ${start} TO PLAY AGAIN` : `PRESS ${start} TO START`;
+    CONTROLS[device].forEach(([key, action], i) => {
+      this.controlsKeys[i].text = key;
+      this.controlsActions[i].text = action;
+    });
     this.highText.text = high > 0 ? `HIGH SCORE  ${String(high).padStart(6, '0')}` : '';
-    this.audioText.text = muted ? 'SOUND MUTED · N' : audioHint;
+    this.audioText.text = muted ? `SOUND MUTED · ${device === 'gamepad' ? 'VIEW' : 'N'}` : audioHint;
 
     const panelX = SCREEN_W - HUD_W;
     this.rows.forEach((row, i) => {

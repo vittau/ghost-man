@@ -9,14 +9,23 @@
     "start": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --port 4173",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "pixi-filters": "^6.1.5",
-    "pixi.js": "^8.21.0"
+    "typecheck": "tsc --noEmit",
+    "desktop": "npm run build && electron .",
+    "dist": "npm run build && electron-builder"
   },
   "devDependencies": {
-    "typescript": "^5.9.3",
-    "vite": "^7.1.12"
-  }
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
+    "pixi-filters": "^6.1.5",
+    "pixi.js": "^8.21.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1"
+  },
+  "main": "electron/main.js",
+  "author": "Vitor",
+  "homepage": "https://www.vitormach.dev/ghost-man/",
+  "engines": {
+    "node": ">=24"
+  },
+  "desktopName": "ghost-man.desktop"
 }

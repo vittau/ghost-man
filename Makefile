@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := dev
-.PHONY: install dev start build preview deploy clean
+.PHONY: install dev start build preview desktop dist deploy clean
 
 # One command to play locally. `make` is an alias for `make dev`.
 install:
@@ -17,6 +17,13 @@ preview: install
 	npm run build
 	npm run preview
 
+# Run the game in the Electron shell, or package it for this OS into release/.
+desktop: install
+	npm run desktop
+
+dist: install
+	npm run dist
+
 # Publish dist/ to the gh-pages branch (GitHub Pages). Purge the Cloudflare
 # cache afterwards to see it live. Old hashed assets are kept so a stale cached
 # index.html still finds the JS/CSS it points at until the purge.
@@ -32,4 +39,4 @@ deploy: build
 	rm -rf "$$tmp"
 
 clean:
-	rm -rf dist node_modules
+	rm -rf dist release node_modules
