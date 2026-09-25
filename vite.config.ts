@@ -1,9 +1,10 @@
 import { defineConfig } from 'vite';
 
-export default defineConfig(({ command }) => ({
-  // Local dev serves at http://localhost:5173/ for convenience; only the
-  // production build uses the /gorgeous-ghost-man/ base for vitormach.dev.
-  base: command === 'build' ? '/gorgeous-ghost-man/' : '/',
+export default defineConfig(() => ({
+  // Relative asset URLs, so the same build works wherever it is hosted:
+  // GitHub Pages (www.vitormach.dev/ghost-man/), any other sub-path, or a
+  // desktop wrapper.
+  base: './',
   build: {
     target: 'es2022',
     outDir: 'dist',

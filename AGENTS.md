@@ -19,8 +19,8 @@ npm run build        # typecheck + production build into dist/
 npm run preview      # serve the production build on :4173
 ```
 
-`npm run dev` serves at the root URL; only the production build uses the
-`/gorgeous-ghost-man/` base path (see `vite.config.ts`).
+`npm run dev` serves at the root URL. `make deploy` publishes to GitHub Pages
+(see Deploying).
 
 ## Layout of the source
 
@@ -127,6 +127,9 @@ low-quality downgrade in `main.ts`.
 
 ## Deploying
 
-`npm run build` emits a static bundle in `dist/`, already configured for
-`vitormach.dev/gorgeous-ghost-man/`. It also runs from `file://`, so wrapping it
-in Tauri or Electron for a desktop build needs no code changes.
+`npm run build` emits a static bundle in `dist/` with a relative base
+(`base: './'`), so it works under any sub-path. `make deploy` builds and
+force-pushes `dist/` as a single-commit `gh-pages` branch; GitHub Pages serves
+it at `https://www.vitormach.dev/ghost-man/` (the account's Pages domain).
+Keep the base relative — an absolute base 404s every asset on Pages. The same
+bundle can be wrapped in Tauri or Electron for a desktop build.
