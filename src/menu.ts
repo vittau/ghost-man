@@ -11,7 +11,7 @@ import {
   SKY,
   VIEW_W,
 } from './config';
-import { drawGhost } from './draw';
+import { SKIRT_RATE, drawGhost } from './draw';
 import { valueNoise } from './noise';
 import type { GhostDef } from './config';
 
@@ -19,6 +19,7 @@ const SKY_STOPS = [SKY.top, SKY.upper, SKY.mid, SKY.lower, SKY.horizon];
 const SUN_STOPS = [PALETTE.sunTop, PALETTE.sunMid, PALETTE.sunBot];
 const ROW_Y = [40, 128, 216, 304];
 const ROW_H = 84;
+const ROW_GHOST_R = 20;
 const HORIZON = SCREEN_H * 0.55;
 /** Height of the frosted header behind the title (the demo plays below it). */
 export const HEADER_H = 220;
@@ -295,7 +296,10 @@ export class Menu {
     this.chooseHint.position.set(panelX + HUD_W - 24, 18);
 
     this.rows.forEach((row, i) => {
-      row.ghost.position.set(cx + 24, ROW_Y[i] + 44);
+      // Centred in the gutter left of the text (box edge at cx - 4, text at
+      // cx + 58). The body reaches r above its origin and ~1.16r below it
+      // (skirt), so the origin sits a touch above the row's middle.
+      row.ghost.position.set(cx + 28, ROW_Y[i] + ROW_H / 2 - ROW_GHOST_R * 0.08);
       row.name.position.set(cx + 58, ROW_Y[i] + 10);
       row.ability.position.set(cx + 58, ROW_Y[i] + 32);
       row.desc.position.set(cx + 58, ROW_Y[i] + 50);
@@ -377,10 +381,10 @@ export class Menu {
 
       row.ghost.clear();
       const pulse = active ? 1 + Math.sin(this.t * 5) * 0.05 : 1;
-      drawGhost(row.ghost, 24 * pulse, {
+      drawGhost(row.ghost, ROW_GHOST_R * pulse, {
         color: row.def.color,
         dir: 'left',
-        wave: 4 + Math.sin(this.t * 4 + i) * 3,
+        wave: this.t * SKIRT_RATE + i * 0.37,
       });
       row.name.alpha = active ? 1 : 0.7;
       row.ability.alpha = active ? 1 : 0.7;
@@ -541,6 +545,25 @@ export class Menu {
     layer(this.nearPeaks, 0x12062a, PALETTE.accent, 0.7);
   }
 
+  // Terrain heights per world row, sampled every TERRAIN.dx. A row keeps its
+  // heights as it scrolls toward the camera, so each is computed once instead
+  // of every frame (the noise was a large share of the title screen's CPU).
+  private readonly heightRows = new Map<number, Float32Array>();
+  private heightHalf = 0;
+
+  /** Height at world-x `x` on world row `row` (x a multiple of TERRAIN.dx). */
+  private heightAt(row: number, x: number): number {
+    const k = Math.round(x / TERRAIN.dx) + this.heightHalf;
+    let hs = this.heightRows.get(row);
+    if (!hs) {
+      hs = new Float32Array(this.heightHalf * 2 + 1).fill(NaN);
+      this.heightRows.set(row, hs);
+    }
+    if (k < 0 || k >= hs.length) return this.terrainHeight(x, row * TERRAIN.dz);
+    if (Number.isNaN(hs[k])) hs[k] = this.terrainHeight(x, row * TERRAIN.dz);
+    return hs[k];
+  }
+
   /** Terrain height: a flat valley down the middle, hills rising to the sides. */
   private terrainHeight(x: number, z: number): number {
     const ax = Math.abs(x);
@@ -577,15 +600,23 @@ export class Menu {
     const projY = (h: number, z: number): number => HORIZON + ((1 - h) * focal) / z;
     const colStep = TERRAIN.dx * TERRAIN.colEvery;
 
-    let prevZw = 0;
+    // Size the height cache for the widest (farthest) row; drop passed rows.
+    const half = Math.ceil(((Math.max(cx, SCREEN_W - cx) + 40) * TERRAIN.zFar) / focal / TERRAIN.dx) + 4;
+    if (half !== this.heightHalf) {
+      this.heightHalf = half;
+      this.heightRows.clear();
+    }
+    for (const row of this.heightRows.keys()) if (row < base) this.heightRows.delete(row);
+
+    let prevRow = 0;
     let prevZ = 0;
     for (let i = rows; i >= 0; i--) {
-      const zw = (base + i) * TERRAIN.dz;
-      const z = zw - travel;
+      const row = base + i;
+      const z = row * TERRAIN.dz - travel;
       if (z < TERRAIN.zNear || z > TERRAIN.zFar) continue;
       // Thin the far rows by world index, so the pattern holds while scrolling.
       const thin = z > TERRAIN.fogFar * 1.5 ? 4 : z > TERRAIN.fogFar ? 2 : 1;
-      if ((base + i) % thin !== 0) continue;
+      if (row % thin !== 0) continue;
       const fog = Math.max(0, Math.min(1, 1 - (z - TERRAIN.zNear) / (TERRAIN.fogFar - TERRAIN.zNear)));
 
       // World-x range visible on this row, padded a little past each edge.
@@ -595,8 +626,8 @@ export class Menu {
       // Column struts back to the previous (farther) row.
       if (prevZ > 0) {
         for (let x = Math.ceil(xMin / colStep) * colStep; x <= xMax; x += colStep) {
-          g.moveTo(projX(x, prevZ), projY(this.terrainHeight(x, prevZw), prevZ));
-          g.lineTo(projX(x, z), projY(this.terrainHeight(x, zw), z));
+          g.moveTo(projX(x, prevZ), projY(this.heightAt(prevRow, x), prevZ));
+          g.lineTo(projX(x, z), projY(this.heightAt(row, x), z));
         }
         g.stroke({ width: 1, color: PALETTE.grid, alpha: 0.12 + fog * 0.3 });
       }
@@ -605,7 +636,7 @@ export class Menu {
       const step = TERRAIN.dx * Math.max(1, Math.floor((10 * z) / (focal * TERRAIN.dx)));
       const pts: number[] = [];
       for (let x = Math.floor(xMin / step) * step; x <= xMax + step; x += step) {
-        pts.push(projX(x, z), projY(this.terrainHeight(x, zw), z));
+        pts.push(projX(x, z), projY(this.heightAt(row, x), z));
       }
 
       const ground = projY(0, z);
@@ -621,9 +652,11 @@ export class Menu {
         width: 1 + fog * 0.6,
         color: lerpColor(PALETTE.accent2, PALETTE.grid, 0.35 + fog * 0.65),
         alpha: 0.14 + fog * 0.5,
-        join: 'round',
+        // Round joins add a fan of triangles per vertex; at ~1px a bevel looks
+        // the same and is far cheaper to rebuild every frame.
+        join: 'bevel',
       });
-      prevZw = zw;
+      prevRow = row;
       prevZ = z;
     }
   }

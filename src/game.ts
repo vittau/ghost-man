@@ -32,7 +32,7 @@ import { Maze, NavCache, WALL } from './maze';
 import { centerOf } from './mover';
 import { Ghost, Pacman, threatField } from './actors';
 import type { SimContext, SimFields } from './actors';
-import { drawDoor, drawGhost, drawGhostSilhouette, drawPacman, drawSparkle } from './draw';
+import { SKIRT_RATE, drawDoor, drawGhost, drawGhostSilhouette, drawPacman, drawSparkle } from './draw';
 import { Fx } from './fx';
 import { GameAudio } from './audio';
 import { Hud } from './hud';
@@ -57,6 +57,10 @@ import levelTrack5 from './assets/audio/06-the-climax.mp3';
 /** Title-screen demo camera: tiles visible top to bottom, and seconds per ghost. */
 const DEMO_TILES_TALL = 11;
 const DEMO_FOCUS_TIME = 5;
+/** Redraw rate of the drifting wall texture (see drawWallDots). */
+const WALL_DOTS_HZ = 20;
+/** Motion-trail sampling interval (see drawTrails). */
+const TRAIL_STEP = 1 / 60;
 
 const dirAngle = (d: Dir, fallback: number): number => {
   switch (d) {
@@ -172,6 +176,9 @@ export class Game {
   private demoFocus = 0;
   private demoFocusT = 0;
   private demoCam: { x: number; y: number } | null = null;
+  private wallDotsWindow = -1;
+  private wallDotsAt = 0;
+  private trailClock = 0;
   private pacAngle = dirAngle('left', Math.PI);
   private muted = false;
   private lastFps = 60;
@@ -214,7 +221,7 @@ export class Game {
     this.buildBackdrop();
     this.layoutDemoMask();
 
-    // Stage layering: menu background → world → HUD → menu UI → flash.
+    // Stage layering: menu background → world → HUD → menu UI → FPS → flash.
     app.stage.addChild(
       this.backdrop,
       this.menu.bgLayer,
@@ -222,6 +229,7 @@ export class Game {
       this.overlayGfx,
       this.hud.layer,
       this.menu.uiLayer,
+      this.hud.fpsLayer,
       this.fx.flashLayer,
       this.demoMask,
     );
@@ -330,6 +338,7 @@ export class Game {
   }
 
   private buildMaze(): void {
+    this.wallDotsWindow = -1; // the texture takes the theme's accent
     this.mazeFill.clear();
     this.mazeGfx.clear();
     // Solid fill, row-tinted for a vertical gradient.
@@ -409,22 +418,30 @@ export class Game {
    * Wall texture: one soft dot per wall tile whose size and position are driven
    * by slowly drifting value noise. Nearby dots share the field, so the walls
    * breathe in soft waves instead of flickering. Only tiles inside the camera
-   * window are drawn, keeping the cost flat.
+   * window are drawn, keeping the cost flat. The field drifts slowly, so it is
+   * rebuilt at WALL_DOTS_HZ (or when the window gains a tile) rather than every
+   * frame: rebuilding a thousand-odd circles was a big share of each frame.
    */
   private drawWallDots(): void {
-    this.wallDots.clear();
-    const demo = this.phase === 'menu' || this.phase === 'gameover';
-    const visibleH = SCREEN_H / MAZE_ZOOM;
-    const r0 = demo ? 0 : Math.max(0, Math.floor(this.camY / TILE) - 1);
-    const r1 = demo ? ROWS : Math.min(ROWS, Math.ceil((this.camY + visibleH) / TILE) + 1);
+    // The camera window in tiles, from the world transform (already set).
+    const s = this.world.scale.x;
+    const c0 = Math.max(0, Math.floor(-this.world.x / s / TILE) - 1);
+    const c1 = Math.min(COLS, Math.ceil((VIEW_W - this.world.x) / s / TILE) + 1);
+    const r0 = Math.max(0, Math.floor(-this.world.y / s / TILE) - 1);
+    const r1 = Math.min(ROWS, Math.ceil((SCREEN_H - this.world.y) / s / TILE) + 1);
     const t = this.elapsed;
+    const win = c0 + c1 * 64 + r0 * 4096 + r1 * 262144;
+    if (win === this.wallDotsWindow && t - this.wallDotsAt < 1 / WALL_DOTS_HZ) return;
+    this.wallDotsWindow = win;
+    this.wallDotsAt = t;
+    this.wallDots.clear();
 
     // The noise field itself drifts diagonally; the second octave adds detail.
     const driftX = t * 0.045;
     const driftY = t * 0.03;
 
     for (let r = r0; r < r1; r++) {
-      for (let c = 0; c < COLS; c++) {
+      for (let c = c0; c < c1; c++) {
         if (this.maze.kindAt(c, r) !== WALL) continue;
 
         // 2x2 sub-dots per tile (~17px apart) matches the original density.
@@ -1234,7 +1251,7 @@ export class Game {
     this.drawPortals();
     this.drawPower();
     this.drawDoorGfx();
-    this.drawTrails();
+    this.drawTrails(dt);
     this.drawPac();
     this.drawAlert();
     for (const g of this.ghosts) this.drawGhostView(g);
@@ -1374,6 +1391,7 @@ export class Game {
     const eaten = g.state === 'eaten';
     const r = TILE * 0.45;
     const body = frightened ? PALETTE.frightBody : g.def.color;
+    const wave = this.elapsed * SKIRT_RATE + GHOSTS.indexOf(g.def) * 0.37;
     if (!eaten) {
       // Neon light pooling on the floor beneath the skirt.
       view.ellipse(0, r * 1.02, r * 0.85, r * 0.2).fill({ color: body, alpha: 0.22 });
@@ -1381,8 +1399,8 @@ export class Game {
     if (g.mover.phase && !eaten) {
       // PHASE: the ghost de-syncs into chromatic ghost images while in the wall.
       const j = Math.sin(this.elapsed * 40) * 1.5;
-      drawGhostSilhouette(view, -3 + j, 0, r, 3, PALETTE.accent, 0.45);
-      drawGhostSilhouette(view, 3 - j, 0, r, 3, PALETTE.accent2, 0.45);
+      drawGhostSilhouette(view, -3 + j, 0, r, wave, PALETTE.accent, 0.45);
+      drawGhostSilhouette(view, 3 - j, 0, r, wave, PALETTE.accent2, 0.45);
     }
     drawGhost(view, r, {
       color: g.def.color,
@@ -1390,7 +1408,7 @@ export class Game {
       frightened,
       flash: g.flash,
       eaten: g.state === 'eaten',
-      wave: 2.5 + 2.5 * Math.sin(this.elapsed * 9 + g.mover.tx),
+      wave,
     });
     view.position.set(g.px, g.py);
     view.alpha = eaten ? 0.75 : g.mover.phase ? 0.7 : 1;
@@ -1401,10 +1419,16 @@ export class Game {
    * and a powered Pac-Man leave a bright one (red when he's furious). Samples that jump (tunnel wrap,
    * blink, respawn) break the trail instead of streaking across the board.
    */
-  private drawTrails(): void {
+  private drawTrails(dt: number): void {
     const g = this.trailGfx;
     g.clear();
     const LEN = 10;
+    // Sampled at 60 Hz on average whatever the refresh rate, so a trail spans
+    // the same time (and length) on a 120 Hz screen as on a 60 Hz one. The 10%
+    // slack keeps frame-time jitter at 60 Hz from skipping samples.
+    this.trailClock += dt;
+    const due = this.trailClock >= TRAIL_STEP * 0.9;
+    if (due) this.trailClock = Math.max(0, this.trailClock - TRAIL_STEP);
     const sample = (key: string, x: number, y: number): Array<{ x: number; y: number }> => {
       let pts = this.trails.get(key);
       if (!pts) {
@@ -1413,8 +1437,10 @@ export class Game {
       }
       const last = pts[pts.length - 1];
       if (last && Math.hypot(last.x - x, last.y - y) > TILE * 1.5) pts.length = 0;
-      pts.push({ x, y });
-      if (pts.length > LEN) pts.shift();
+      if (due || !pts.length) {
+        pts.push({ x, y });
+        if (pts.length > LEN) pts.shift();
+      }
       return pts;
     };
 

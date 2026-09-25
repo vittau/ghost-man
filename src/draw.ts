@@ -54,7 +54,7 @@ export interface GhostStyle {
   frightened?: boolean;
   flash?: boolean;
   eaten?: boolean;
-  /** Skirt animation phase. */
+  /** Skirt ripple phase, in scallops (see `ghostPath`). */
   wave?: number;
   /** Positional nudge for the pupils (pixels, at r = 1 scale it's multiplied). */
   lookX?: number;
@@ -84,22 +84,26 @@ function bodyGradient(color: number): FillGradient {
   return grad;
 }
 
-/** Trace the ghost outline (dome + scalloped skirt) as the current path. */
-export function ghostPath(g: Graphics, r: number, wave: number): void {
-  const yb = r * 0.86; // skirt baseline
-  g.moveTo(-r, yb);
-  g.lineTo(-r, 0);
-  g.arc(0, 0, r, Math.PI, Math.PI * 2);
-  g.lineTo(r, yb);
+/** Skirt ripple speed, in scallops per second. */
+export const SKIRT_RATE = 3.2;
+const SKIRT_LOBES = 3;
+const SKIRT_STEPS = 24;
 
-  const n = 3;
-  const w = (2 * r) / n;
-  for (let i = 0; i < n; i++) {
-    const xa = r - i * w;
-    const xb = xa - w / 2;
-    const xc = xa - w;
-    const dip = (i % 2 === 0 ? 1 : -0.35) * wave;
-    g.quadraticCurveTo(xb, yb + dip, xc, yb);
+/**
+ * Trace the ghost outline (dome + scalloped skirt) as the current path. The
+ * scallops ripple sideways as `wave` advances (one scallop per unit), like the
+ * arcade ghosts' wriggling hem; a negative rate sends the ripple the other way.
+ */
+export function ghostPath(g: Graphics, r: number, wave: number, x = 0, y = 0): void {
+  const yb = y + r * 0.86; // skirt baseline
+  const depth = r * 0.3;
+  g.moveTo(x - r, yb);
+  g.lineTo(x - r, y);
+  g.arc(x, y, r, Math.PI, Math.PI * 2);
+  for (let i = 0; i <= SKIRT_STEPS; i++) {
+    const u = i / SKIRT_STEPS; // 0 at the right edge, 1 at the left
+    const lobe = Math.abs(Math.sin(Math.PI * (u * SKIRT_LOBES + wave)));
+    g.lineTo(x + r - u * 2 * r, yb + depth * lobe);
   }
   g.closePath();
 }
@@ -114,18 +118,7 @@ export function drawGhostSilhouette(
   color: number,
   alpha: number,
 ): void {
-  const yb = r * 0.86;
-  g.moveTo(x - r, y + yb);
-  g.lineTo(x - r, y);
-  g.arc(x, y, r, Math.PI, Math.PI * 2);
-  g.lineTo(x + r, y + yb);
-  const w = (2 * r) / 3;
-  for (let i = 0; i < 3; i++) {
-    const xa = x + r - i * w;
-    const dip = (i % 2 === 0 ? 1 : -0.35) * wave;
-    g.quadraticCurveTo(xa - w / 2, y + yb + dip, xa - w, y + yb);
-  }
-  g.closePath();
+  ghostPath(g, r, wave, x, y);
   g.fill({ color, alpha });
 }
 
@@ -140,8 +133,12 @@ export function drawGhost(g: Graphics, r: number, style: GhostStyle): void {
     ghostPath(g, r, wave);
     g.fill(bodyGradient(body));
 
-    // Rim light along the upper-left of the dome, plus a glassy highlight.
-    g.arc(0, 0, r * 0.84, Math.PI * 1.08, Math.PI * 1.42);
+    // Rim light along the upper-left of the dome, plus a glassy highlight. The
+    // explicit moveTo keeps the arc from being joined to the skirt's last point.
+    const rim = r * 0.8;
+    const a0 = Math.PI * 1.12;
+    g.moveTo(Math.cos(a0) * rim, Math.sin(a0) * rim);
+    g.arc(0, 0, rim, a0, Math.PI * 1.4);
     g.stroke({ width: r * 0.09, color: PALETTE.white, alpha: frightened ? 0.18 : 0.4, cap: 'round' });
     g.ellipse(-r * 0.3, -r * 0.45, r * 0.34, r * 0.2);
     g.fill({ color: PALETTE.white, alpha: frightened ? 0.08 : 0.12 });

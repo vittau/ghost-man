@@ -69,6 +69,9 @@ const mkText = (
  */
 export class Hud {
   readonly layer = new Container();
+  /** The FPS readout lives apart from the panel so it also shows on the title screen. */
+  readonly fpsLayer = new Container();
+  private readonly fpsBack = new Graphics();
 
   private readonly panel = new Graphics();
   private readonly bars = new Graphics();
@@ -160,7 +163,6 @@ export class Hud {
       this.keyHint1,
       this.keyHint2,
       this.trackText,
-      this.fpsText,
       this.lifeLayer,
       this.message,
       this.submessage,
@@ -168,6 +170,11 @@ export class Hud {
       ...this.stanceDescs,
       ...this.barsKeyLabels,
     );
+
+    this.fpsBack.roundRect(10, 6, 84, 20, 4).fill({ color: PALETTE.bgDeep, alpha: 0.82 });
+    this.fpsBack.roundRect(10, 6, 84, 20, 4).stroke({ width: 1, color: PALETTE.accent2, alpha: 0.4 });
+    this.fpsLayer.addChild(this.fpsBack, this.fpsText);
+    this.fpsLayer.visible = false;
 
     this.layout();
   }
@@ -247,7 +254,7 @@ export class Hud {
     this.scoreValue.text = String(s.score).padStart(6, '0');
     this.highValue.text = String(s.high).padStart(6, '0');
     this.levelValue.text = String(s.level);
-    this.fpsText.visible = s.showFps;
+    this.fpsLayer.visible = s.showFps;
     this.fpsText.text = `${Math.round(s.fps)} FPS`;
     this.abilityValue.text = s.abilityName;
     this.abilityValue.style.fill = s.abilityReady ? PALETTE.gold : PALETTE.textDim;
@@ -302,11 +309,6 @@ export class Hud {
   }
 
   private drawMeters(s: HudState): void {
-    if (s.showFps) {
-      this.bars.roundRect(10, 6, 84, 20, 4).fill({ color: PALETTE.bgDeep, alpha: 0.82 });
-      this.bars.roundRect(10, 6, 84, 20, 4).stroke({ width: 1, color: PALETTE.accent2, alpha: 0.4 });
-    }
-
     if (s.abilityLocked) {
       this.ledBar(ABILITY_BAR_Y, 1, PALETTE.danger, 0.3);
     } else {
@@ -363,7 +365,7 @@ export class Hud {
     drawGhost(this.bigGhost, 30 * pulse, {
       color: s.playerColor,
       dir: 'left',
-      wave: 5,
+      wave: 0,
     });
   }
 
@@ -374,7 +376,7 @@ export class Hud {
       if (!on) return;
       v.clear();
       v.position.set(this.cx + 13 + i * 28, LIVES_Y + 40);
-      drawGhost(v, 12, { color: s.playerColor, dir: 'left', wave: 4 });
+      drawGhost(v, 12, { color: s.playerColor, dir: 'left', wave: 0 });
     });
 
     this.pacIcons.forEach((v, i) => {

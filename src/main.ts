@@ -46,7 +46,10 @@ async function boot(): Promise<void> {
     useBackBuffer: true,
     powerPreference: 'high-performance',
   });
-  app.ticker.maxFPS = 60;
+  // No frame cap: the ticker runs on requestAnimationFrame, which the browser
+  // paces to the display's refresh (v-sync). A fixed 60 cap on a 120/144 Hz
+  // screen drops frames unevenly and judders. Everything steps by real dt.
+  app.ticker.maxFPS = 0;
 
   document.getElementById('loading')?.remove();
   const mount = document.getElementById('app') ?? document.body;

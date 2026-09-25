@@ -12,7 +12,6 @@ import {
   SCATTER,
   SPEED,
   STANCE_INFO,
-  TILE,
   TUNNEL_SLOW,
 } from './config';
 import { Maze, NavCache, isTunnel } from './maze';
@@ -623,7 +622,6 @@ export class Ghost {
   /** Last tile this ghost chose to path toward (used for intent lines). */
   lastTarget: TilePos = { x: 0, y: 0 };
 
-  wave = 0;
   bob = 0;
   private bobPhase = Math.random() * Math.PI * 2;
   private releaseTimer = 0;
@@ -862,7 +860,6 @@ export class Ghost {
 
   update(dt: number, ctx: SimContext): void {
     this.updateTimers(dt);
-    this.wave = 0.16 * TILE + 0.09 * TILE * Math.sin(performance.now() / 90 + this.bobPhase);
 
     if (this.state === 'house') {
       this.bobPhase += dt * 3.2;
