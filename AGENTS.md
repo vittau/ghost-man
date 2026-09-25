@@ -129,7 +129,15 @@ low-quality downgrade in `main.ts`.
 
 `npm run build` emits a static bundle in `dist/` with a relative base
 (`base: './'`), so it works under any sub-path. `make deploy` builds and
-force-pushes `dist/` as a single-commit `gh-pages` branch; GitHub Pages serves
-it at `https://www.vitormach.dev/ghost-man/` (the account's Pages domain).
-Keep the base relative — an absolute base 404s every asset on Pages. The same
-bundle can be wrapped in Tauri or Electron for a desktop build.
+commits `dist/` onto the `gh-pages` branch; GitHub Pages serves it at
+`https://www.vitormach.dev/ghost-man/` (the account's Pages domain).
+
+- Keep the base relative — an absolute base 404s every asset on Pages.
+- The domain sits behind Cloudflare, which caches HTML (and 404s) at the
+  edge for up to a day. After a deploy, the owner purges the Cloudflare cache
+  to make it live. Until then a stale `index.html` may be served, so
+  `make deploy` never deletes old hashed files from `assets/` — the stale page
+  must still find the bundle it references. Don't switch it to a fresh
+  force-pushed branch.
+
+The same bundle can be wrapped in Tauri or Electron for a desktop build.

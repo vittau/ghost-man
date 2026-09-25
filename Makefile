@@ -17,14 +17,18 @@ preview: install
 	npm run build
 	npm run preview
 
-# Publish dist/ to the gh-pages branch (GitHub Pages). Each deploy is a fresh
-# single-commit branch, so the history holds nothing but the current build.
+# Publish dist/ to the gh-pages branch (GitHub Pages). Purge the Cloudflare
+# cache afterwards to see it live. Old hashed assets are kept so a stale cached
+# index.html still finds the JS/CSS it points at until the purge.
 deploy: build
-	@set -e; sha=$$(git rev-parse --short HEAD); tmp=$$(mktemp -d); \
+	@set -e; sha=$$(git rev-parse --short HEAD); url=$$(git remote get-url origin); \
+	tmp=$$(mktemp -d); \
+	git clone -q --depth 1 --branch gh-pages "$$url" "$$tmp" 2>/dev/null || git init -q -b gh-pages "$$tmp"; \
+	find "$$tmp" -mindepth 1 -maxdepth 1 ! -name .git ! -name assets -exec rm -rf {} +; \
 	cp -R dist/. "$$tmp"; touch "$$tmp/.nojekyll"; \
-	cd "$$tmp" && git init -q -b gh-pages && git add -A && \
-	git commit -q -m "Deploy from main@$$sha" && \
-	git push -f "$$(git -C "$(CURDIR)" remote get-url origin)" gh-pages; \
+	cd "$$tmp"; git add -A; \
+	if git diff --cached --quiet; then echo "gh-pages already up to date"; \
+	else git commit -q -m "Deploy from main@$$sha" && git push -q "$$url" gh-pages && echo "deployed main@$$sha"; fi; \
 	rm -rf "$$tmp"
 
 clean:
