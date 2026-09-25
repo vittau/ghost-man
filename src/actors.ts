@@ -46,7 +46,6 @@ export interface SimContext {
   ghosts: Ghost[];
   fields: SimFields;
   stance: Stance;
-  pincer: boolean;
   playerId: GhostId;
   level: number;
 }
@@ -599,20 +598,6 @@ export class Ghost {
     const pacTile = { x: ctx.pac.mover.tx, y: ctx.pac.mover.ty };
     const pacDir: UnitDir = ctx.pac.mover.dir === 'none' ? 'left' : (ctx.pac.mover.dir as UnitDir);
 
-    if (ctx.pincer) {
-      const f = DIRS[pacDir];
-      const perp = { x: f.y, y: f.x };
-      const friends = ctx.ghosts.filter((g) => !g.isPlayer);
-      const i = friends.indexOf(this);
-      const points: TilePos[] = [
-        addTile(pacTile, f, 2),
-        { x: pacTile.x + perp.x * 2, y: pacTile.y + perp.y * 2 },
-        { x: pacTile.x - perp.x * 2, y: pacTile.y - perp.y * 2 },
-        { x: pacTile.x - f.x * 2, y: pacTile.y - f.y * 2 },
-      ];
-      return points[(i < 0 ? 0 : i) % points.length];
-    }
-
     switch (ctx.stance) {
       case 'ambush':
         return addTile(pacTile, DIRS[pacDir], 4);
@@ -658,17 +643,42 @@ export class Ghost {
     }
   }
 
-  /** Choose a direction: BFS toward the target, random when frightened. */
+  /**
+   * Choose a direction: BFS toward the target, random when frightened. Judged
+   * at the tile where the turn can actually happen (the one the ghost is
+   * heading into), like Pac-Man; judging from the tile it's leaving made every
+   * ghost overshoot junctions and zig-zag.
+   */
   private chooseDir(ctx: SimContext, target: TilePos): void {
     const m = this.mover;
+    const at = m.nextTile;
     const back = OPPOSITE[m.dir];
+
+    // Eyes heading home turn round on the spot when home is behind them,
+    // instead of running to the end of the corridor and doubling back.
+    if (this.state === 'eaten' && back !== 'none') {
+      const field = ctx.nav.to(target, true);
+      const ahead = fieldAt(m.maze, field, at.x, at.y);
+      const behindTile = m.t > 0 ? m.tile : neighborOf(at.x, at.y, back as UnitDir);
+      const canTurn = m.t > 0 || m.canEnterFrom(at.x, at.y, back as UnitDir);
+      const behind = canTurn ? fieldAt(m.maze, field, behindTile.x, behindTile.y) : -1;
+      const aheadCost = (m.t > 0 ? 1 - m.t : 0) + ahead;
+      const behindCost = (m.t > 0 ? m.t : 1) + behind;
+      if (behind >= 0 && (ahead < 0 || behindCost + 0.5 < aheadCost)) {
+        m.want = back;
+        return;
+      }
+    }
+
     const opts: UnitDir[] = [];
     for (const d of DIR_ORDER) {
       if (d === back) continue;
-      if (m.canEnter(d)) opts.push(d);
+      if (m.canEnterFrom(at.x, at.y, d)) opts.push(d);
     }
     if (opts.length === 0) {
-      if (back !== 'none' && m.canEnter(back as UnitDir)) m.want = back;
+      // Dead end ahead: turn round once there, not halfway along the step.
+      if (m.t > 0) m.want = m.dir;
+      else if (back !== 'none' && m.canEnterFrom(at.x, at.y, back as UnitDir)) m.want = back;
       return;
     }
     if (opts.length === 1) {
@@ -684,7 +694,7 @@ export class Ghost {
     let best = opts[0];
     let bestD = Infinity;
     for (const d of opts) {
-      const n = neighborOf(m.tx, m.ty, d);
+      const n = neighborOf(at.x, at.y, d);
       const dd = fieldAt(m.maze, field, n.x, n.y);
       if (dd >= 0 && dd < bestD) {
         bestD = dd;
@@ -757,7 +767,6 @@ export const ghostStatusLine = (g: Ghost, ctx: SimContext): string => {
   if (g.state === 'eaten') return 'BANISHED';
   if (g.state === 'frightened') return 'FRIGHTENED';
   if (g.state === 'house') return 'HOUSE';
-  if (ctx.pincer) return 'PINCER';
   return STANCE_INFO[ctx.stance].name;
 };
 

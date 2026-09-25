@@ -130,11 +130,6 @@ export class GameAudio {
     );
   }
 
-  pincer(): void {
-    [220, 330, 440].forEach((f) => this.tone(f, 0.4, { type: 'sawtooth', gain: 0.12 }));
-    this.tone(880, 0.5, { type: 'triangle', gain: 0.1, slideTo: 220 });
-  }
-
   ability(): void {
     this.tone(500, 0.22, { type: 'sawtooth', gain: 0.16, slideTo: 1400 });
   }

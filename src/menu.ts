@@ -1,4 +1,5 @@
 import { Container, FillGradient, Graphics, Text } from 'pixi.js';
+import { BackdropBlurFilter } from 'pixi-filters';
 import { lerpColor, sampleGradient } from './color';
 import {
   FONT_FAMILY,
@@ -19,17 +20,40 @@ const SUN_STOPS = [PALETTE.sunTop, PALETTE.sunMid, PALETTE.sunBot];
 const ROW_Y = [40, 128, 216, 304];
 const ROW_H = 84;
 const HORIZON = SCREEN_H * 0.55;
+/** Height of the frosted header behind the title (the demo plays below it). */
+export const HEADER_H = 220;
+
+// The sun's slices: below SUN_CUT of the disc, a gap opens every SUN_PERIOD
+// px, widening by SUN_GAP px per disc-height toward the bottom, drifting at
+// SUN_DRIFT px/s. SUN_SPREAD stretches the gradient so the bottom holds violet.
+const SUN_CUT = 0.42;
+const SUN_PERIOD = 18;
+const SUN_GAP = 30;
+const SUN_DRIFT = 9;
+const SUN_SPREAD = 1.1;
 
 // Wireframe terrain: a heightmap seen from a camera one unit above the valley
 // floor, flying forward. Units are arbitrary world units.
 const TERRAIN = {
-  zNear: 0.9,
-  zFar: 13,
+  // Below 1 so a row always sits past the bottom edge: the nearest struts run
+  // off-screen instead of stopping short and leaving an empty strip.
+  zNear: 0.4,
+  // Far enough that the rows run right up to the mountains' feet; beyond
+  // fogFar they thin out (every 2nd, then 4th row) and sink into the haze.
+  zFar: 30,
+  fogFar: 13,
   dz: 0.55, // row spacing
   dx: 0.5, // sample spacing along a row
   colEvery: 2, // a column line every N samples
   speed: 1.1,
 };
+
+/**
+ * Where the mountains stand: the ground line of the farthest terrain row.
+ * Their feet sit there rather than on the horizon (which is at infinity), so
+ * the scrolling grid runs right up to them with no strip of bare floor.
+ */
+const MOUNTAIN_FOOT = HORIZON + (SCREEN_H - HORIZON) / TERRAIN.zFar;
 
 interface Row {
   def: GhostDef;
@@ -71,7 +95,6 @@ const chromeFill = (): FillGradient =>
 const CONTROLS: Array<[string, string]> = [
   ['ARROWS/WASD', 'MOVE'],
   ['1-4 / Q E', 'SQUAD STANCE'],
-  ['SPACE', 'PINCER'],
   ['SHIFT', 'ABILITY'],
   ['P / ESC', 'PAUSE'],
   ['M', 'NEXT SONG'],
@@ -131,11 +154,25 @@ export class Menu {
   private meteor = { x: 0, y: 0, vx: 0, vy: 0, life: 0 };
   private meteorWait = 3;
   private t = 0;
+  /** Sun gradient, cached per disc geometry: a FillGradient owns a texture. */
+  private sunGrad: FillGradient | null = null;
+  private sunGradKey = '';
 
   constructor() {
     this.bgLayer.eventMode = 'none';
     this.uiLayer.eventMode = 'none';
     this.bgLayer.addChild(this.sky, this.stars, this.sun, this.mountains, this.floor);
+
+    // Frosted glass behind the title and the side panel, so the text reads
+    // cleanly over the busy demo. Optional: without it the tinted scrims
+    // still do the job.
+    try {
+      const frost = new BackdropBlurFilter({ strength: 7, quality: 3 });
+      this.scrimGfx.filters = [frost];
+      this.panelGfx.filters = [frost];
+    } catch {
+      /* no backdrop support: plain scrims */
+    }
 
     for (let i = 0; i < 140; i++) {
       this.starField.push({
@@ -242,8 +279,8 @@ export class Menu {
     this.panelGfx.rect(panelX, 0, 1, SCREEN_H).fill({ color: PALETTE.accent, alpha: 0.35 });
 
     this.scrimGfx.clear();
-    this.scrimGfx.rect(0, 0, VIEW_W, 220).fill({ color: 0x0a0318, alpha: 0.6 });
-    this.scrimGfx.rect(0, 220, VIEW_W, 40).fill({ color: 0x0a0318, alpha: 0.3 });
+    this.scrimGfx.rect(0, 0, VIEW_W, HEADER_H).fill({ color: PALETTE.bgDeep, alpha: 0.45 });
+    this.scrimGfx.rect(0, HEADER_H - 1, VIEW_W, 1).fill({ color: PALETTE.accent, alpha: 0.35 });
 
     this.title.position.set(midX, 62);
     this.titleGlow.position.set(midX + 3, 65);
@@ -303,7 +340,7 @@ export class Menu {
     this.prompt.alpha = 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(this.t * 4));
     this.subtitle.text = phase === 'gameover' ? 'GAME OVER' : 'YOU ARE THE GHOST';
     this.subtitle.style.fill = phase === 'gameover' ? PALETTE.danger : PALETTE.textDim;
-    this.prompt.text = phase === 'gameover' ? 'PRESS SPACE FOR THE TITLE' : 'PRESS SPACE TO START';
+    this.prompt.text = phase === 'gameover' ? 'PRESS SPACE TO PLAY AGAIN' : 'PRESS SPACE TO START';
     this.highText.text = high > 0 ? `HIGH SCORE  ${String(high).padStart(6, '0')}` : '';
     this.audioText.text = muted ? 'SOUND MUTED · N' : audioHint;
 
@@ -359,6 +396,9 @@ export class Menu {
       const col = sampleGradient(SKY_STOPS, t0);
       this.sky.rect(0, t0 * HORIZON - 1, SCREEN_W, HORIZON / bands + 2).fill(col);
     }
+    // Horizon glow, behind the mountains: it shows through the valleys only.
+    this.sky.rect(0, HORIZON - 12, SCREEN_W, 12).fill({ color: PALETTE.horizon, alpha: 0.16 });
+    this.sky.rect(0, HORIZON - 3, SCREEN_W, 5).fill({ color: PALETTE.horizon, alpha: 0.8 });
   }
 
   private drawStars(dt: number): void {
@@ -395,7 +435,7 @@ export class Menu {
     }
   }
 
-  /** The vaporwave sunset: gradient disc whose lower half is sliced by bands that drift down. */
+  /** The vaporwave sunset: gradient disc whose lower half is sliced by drifting bands. */
   private drawSun(): void {
     const g = this.sun;
     g.clear();
@@ -408,30 +448,80 @@ export class Menu {
       g.circle(cx, cy, R * (1 + i * 0.16)).fill({ color: PALETTE.sunMid, alpha: 0.025 + (5 - i) * 0.006 });
     }
 
+    // Each solid slice is an exact circle segment with sub-pixel edges, all
+    // filled from one disc-wide gradient, so the bands glide instead of
+    // stepping a pixel row at a time.
     const top = cy - R;
-    const step = 2;
-    const scroll = (this.t * 9) % 18;
-    for (let y = top; y < HORIZON; y += step) {
-      const dy = y + step / 2 - cy;
-      if (Math.abs(dy) >= R) continue;
-      const t = (y - top) / (2 * R);
-      if (t > 0.42) {
-        // Slice gaps grow toward the bottom of the disc.
-        const gap = (t - 0.42) * 30;
-        if ((y - top + scroll) % 18 < gap) continue;
+    const fill = this.sunGradient(top, R);
+    const halfWidth = (y: number): number => Math.sqrt(Math.max(0, R * R - (y - cy) * (y - cy)));
+    for (const [a, b] of this.sunSlices(2 * R, Math.min(HORIZON, cy + R) - top)) {
+      const y0 = top + a;
+      const y1 = top + b;
+      const n = Math.max(2, Math.ceil((y1 - y0) / 1.5));
+      g.moveTo(cx - halfWidth(y0), y0);
+      for (let i = 1; i <= n; i++) {
+        const y = y0 + ((y1 - y0) * i) / n;
+        g.lineTo(cx - halfWidth(y), y);
       }
-      const hw = Math.sqrt(R * R - dy * dy);
-      g.rect(cx - hw, y, hw * 2, step + 0.5).fill(sampleGradient(SUN_STOPS, t * 1.1));
+      for (let i = n; i >= 0; i--) {
+        const y = y0 + ((y1 - y0) * i) / n;
+        g.lineTo(cx + halfWidth(y), y);
+      }
+      g.closePath();
+      g.fill(fill);
     }
+  }
+
+  /**
+   * Solid stretches of a disc of height `d`, from its top down to `end`, as
+   * offsets from the top edge. A gap starting at u lasts until the point e
+   * where e - u equals the gap width there, (e/d - SUN_CUT) * SUN_GAP, which
+   * solves exactly — no per-pixel test, so nothing snaps.
+   */
+  private sunSlices(d: number, end: number): Array<[number, number]> {
+    const out: Array<[number, number]> = [];
+    const scroll = (this.t * SUN_DRIFT) % SUN_PERIOD;
+    const shrink = 1 - SUN_GAP / d;
+    let cursor = 0;
+    for (let k = Math.ceil((SUN_CUT * d + scroll) / SUN_PERIOD); ; k++) {
+      const gapStart = k * SUN_PERIOD - scroll;
+      if (gapStart >= end) break;
+      const gapEnd = Math.min(end, (gapStart - SUN_CUT * SUN_GAP) / shrink);
+      if (gapEnd <= gapStart) continue;
+      if (gapStart > cursor) out.push([cursor, gapStart]);
+      cursor = gapEnd;
+    }
+    if (cursor < end) out.push([cursor, end]);
+    return out;
+  }
+
+  private sunGradient(top: number, R: number): FillGradient {
+    const key = `${top},${R}`;
+    if (this.sunGrad && this.sunGradKey === key) return this.sunGrad;
+    this.sunGrad?.destroy();
+    this.sunGrad = new FillGradient({
+      type: 'linear',
+      start: { x: 0, y: top },
+      end: { x: 0, y: top + 2 * R },
+      textureSpace: 'global',
+      colorStops: [
+        { offset: 0, color: SUN_STOPS[0] },
+        { offset: 0.5 / SUN_SPREAD, color: SUN_STOPS[1] },
+        { offset: 1 / SUN_SPREAD, color: SUN_STOPS[2] },
+        { offset: 1, color: SUN_STOPS[2] },
+      ],
+    });
+    this.sunGradKey = key;
+    return this.sunGrad;
   }
 
   private drawMountains(): void {
     const g = this.mountains;
     g.clear();
     const layer = (peaks: Peak[], fill: number, edge: number, edgeAlpha: number): void => {
-      g.moveTo(0, HORIZON);
+      g.moveTo(0, MOUNTAIN_FOOT);
       for (const p of peaks) g.lineTo(p.x, HORIZON - p.h);
-      g.lineTo(SCREEN_W, HORIZON);
+      g.lineTo(SCREEN_W, MOUNTAIN_FOOT);
       g.closePath();
       g.fill(fill);
 
@@ -442,8 +532,8 @@ export class Menu {
       for (let i = 1; i < peaks.length - 1; i++) {
         const p = peaks[i];
         if (p.h < 12) continue;
-        g.moveTo(p.x, HORIZON - p.h).lineTo(peaks[i - 1].x + (p.x - peaks[i - 1].x) * 0.5, HORIZON);
-        g.moveTo(p.x, HORIZON - p.h).lineTo(p.x + (peaks[i + 1].x - p.x) * 0.5, HORIZON);
+        g.moveTo(p.x, HORIZON - p.h).lineTo(peaks[i - 1].x + (p.x - peaks[i - 1].x) * 0.5, MOUNTAIN_FOOT);
+        g.moveTo(p.x, HORIZON - p.h).lineTo(p.x + (peaks[i + 1].x - p.x) * 0.5, MOUNTAIN_FOOT);
       }
       g.stroke({ width: 1, color: edge, alpha: edgeAlpha * 0.35 });
     };
@@ -476,16 +566,13 @@ export class Menu {
   private drawFloor(): void {
     const g = this.floor;
     g.clear();
-    g.rect(0, HORIZON, SCREEN_W, SCREEN_H - HORIZON).fill(SKY.floor);
-    // Horizon glow goes under the terrain so the hills rise in front of it.
-    g.rect(0, HORIZON - 3, SCREEN_W, 5).fill({ color: PALETTE.horizon, alpha: 0.8 });
-    g.rect(0, HORIZON - 12, SCREEN_W, 12).fill({ color: PALETTE.horizon, alpha: 0.16 });
+    g.rect(0, MOUNTAIN_FOOT, SCREEN_W, SCREEN_H - MOUNTAIN_FOOT).fill(SKY.floor);
 
     const cx = VIEW_W / 2;
     const focal = SCREEN_H - HORIZON; // camera height 1, so z = 1 lands on the bottom edge
     const travel = this.t * TERRAIN.speed;
     const base = Math.floor(travel / TERRAIN.dz);
-    const rows = Math.ceil(TERRAIN.zFar / TERRAIN.dz) + 1;
+    const rows = Math.ceil(TERRAIN.zFar / TERRAIN.dz) + 4;
     const projX = (x: number, z: number): number => cx + (x * focal) / z;
     const projY = (h: number, z: number): number => HORIZON + ((1 - h) * focal) / z;
     const colStep = TERRAIN.dx * TERRAIN.colEvery;
@@ -495,8 +582,11 @@ export class Menu {
     for (let i = rows; i >= 0; i--) {
       const zw = (base + i) * TERRAIN.dz;
       const z = zw - travel;
-      if (z < TERRAIN.zNear) continue;
-      const fog = Math.max(0, Math.min(1, 1 - (z - TERRAIN.zNear) / (TERRAIN.zFar - TERRAIN.zNear)));
+      if (z < TERRAIN.zNear || z > TERRAIN.zFar) continue;
+      // Thin the far rows by world index, so the pattern holds while scrolling.
+      const thin = z > TERRAIN.fogFar * 1.5 ? 4 : z > TERRAIN.fogFar ? 2 : 1;
+      if ((base + i) % thin !== 0) continue;
+      const fog = Math.max(0, Math.min(1, 1 - (z - TERRAIN.zNear) / (TERRAIN.fogFar - TERRAIN.zNear)));
 
       // World-x range visible on this row, padded a little past each edge.
       const xMin = ((-40 - cx) * z) / focal;
@@ -535,13 +625,6 @@ export class Menu {
       });
       prevZw = zw;
       prevZ = z;
-    }
-
-    // Sun reflection smeared across the flat valley floor.
-    for (let i = 0; i < 6; i++) {
-      const y = HORIZON + 6 + i * i * 5;
-      const w = 150 - i * 18;
-      g.rect(cx - w, y, w * 2, 2 + i * 0.4).fill({ color: PALETTE.sunMid, alpha: 0.18 - i * 0.025 });
     }
   }
 

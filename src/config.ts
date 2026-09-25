@@ -70,9 +70,6 @@ export const EXTRA_LIFE_EVERY = 2000; // points per bonus life
 export const RESPAWN_BANISH = 4.5; // seconds a caught ghost sits in the house
 export const READY_TIME = 2.0;
 
-export const PINCER_TIME = 3.2;
-export const PINCER_COOLDOWN = 11.0;
-
 export const ABILITY_COOLDOWN = 8.0;
 export const ABILITY_TIME = 1.4;
 export const BLIND_TIME = 2.5; // Clyde's BLINDSIDE
@@ -124,6 +121,38 @@ export const PALETTE = {
   horizon: 0xff5f9e,
   grid: 0xff3fb0,
 };
+
+/**
+ * Playfield colours, one per level (cycling): the neon tube runs from `top` to
+ * `bottom` down the board, wall interiors from `fillTop` to `fillBottom`, and
+ * `accent` tints the wall texture. All drawn from the vaporwave canon — hot
+ * pink, cyan, mint, lavender, sunset gold — so every level stays on-style.
+ */
+export interface FieldTheme {
+  top: number;
+  bottom: number;
+  fillTop: number;
+  fillBottom: number;
+  accent: number;
+}
+
+export const LEVEL_THEMES: FieldTheme[] = [
+  // Neon: hot pink over cyan.
+  { top: 0xff3fb0, bottom: 0x00e5ff, fillTop: 0x120727, fillBottom: 0x1f0c3c, accent: 0x00e5ff },
+  // Sunset: gold melting into rose.
+  { top: 0xffc94d, bottom: 0xff3f8e, fillTop: 0x1f0a1e, fillBottom: 0x2b0b2c, accent: 0xff9f43 },
+  // Miami: mint over flamingo pink.
+  { top: 0x05ffa1, bottom: 0xff71ce, fillTop: 0x0a1a26, fillBottom: 0x1d0d33, accent: 0x05ffa1 },
+  // Ultraviolet: lavender over electric blue.
+  { top: 0xb967ff, bottom: 0x01cdfe, fillTop: 0x150a35, fillBottom: 0x0b1540, accent: 0xb967ff },
+  // Outrun: laser red into deep violet.
+  { top: 0xff2d6e, bottom: 0x8a3bff, fillTop: 0x1d0619, fillBottom: 0x170a3c, accent: 0xff2d6e },
+  // Vapor: pale lemon over lilac.
+  { top: 0xfffb96, bottom: 0xb967ff, fillTop: 0x1a1430, fillBottom: 0x170b35, accent: 0xfffb96 },
+];
+
+export const themeForLevel = (level: number): FieldTheme =>
+  LEVEL_THEMES[(Math.max(1, level) - 1) % LEVEL_THEMES.length];
 
 // Synthwave sky / floor gradient stops.
 export const SKY = {

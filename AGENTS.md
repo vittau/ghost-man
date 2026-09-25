@@ -80,11 +80,12 @@ npm run preview      # serve the production build on :4173
    pellet reversal.
 8. **Pac-Man hunts when powered.** `Pacman.decide()` has an explicit hunt mode
    that takes priority over pellet seeking, and prefers the player's ghost.
-9. **Pac-Man judges turns at the tile he's heading into** (`Mover.nextTile`),
-   not the one he's leaving, and escapes by comparing arrival times
+9. **Every AI actor judges turns at the tile it's heading into**
+   (`Mover.nextTile`), not the one it's leaving — Pac-Man in `decide()`, ghosts
+   in `chooseDir()`. Judging from the tile being left makes actors overshoot
+   junctions and zig-zag. Pac-Man escapes by comparing arrival times
    (`threatField`: per-ghost travel time with dash and tunnel slowdown priced
-   in). Judging from the tile he's leaving makes him turn a tile late at every
-   junction.
+   in).
 10. **PHASE crosses one wall** and switches off the moment the ghost is back on
     a walkable tile (`Ghost.beginPhase`). It must never strand an actor inside
     geometry.

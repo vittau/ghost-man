@@ -13,8 +13,6 @@ import {
   MAZE_ZOOM,
   PAC_LIVES,
   PALETTE,
-  PINCER_COOLDOWN,
-  PINCER_TIME,
   PLAYER_LIVES,
   READY_TIME,
   ROWS,
@@ -26,7 +24,9 @@ import {
   VIEW_W,
   WORLD_H,
   WORLD_W,
+  themeForLevel,
 } from './config';
+import type { FieldTheme } from './config';
 import { lerpColor } from './color';
 import { Maze, NavCache, WALL } from './maze';
 import { centerOf } from './mover';
@@ -37,7 +37,7 @@ import { Fx } from './fx';
 import { GameAudio } from './audio';
 import { Hud } from './hud';
 import type { HudState } from './hud';
-import { Menu } from './menu';
+import { HEADER_H, Menu } from './menu';
 import { createBloom, createCRT } from './filters';
 import type { CrtResult } from './filters';
 import { DIRS } from './types';
@@ -53,6 +53,10 @@ import levelTrack2 from './assets/audio/03-work-in-progress.mp3';
 import levelTrack3 from './assets/audio/04-demons-on-the-beach.mp3';
 import levelTrack4 from './assets/audio/05-solitude.mp3';
 import levelTrack5 from './assets/audio/06-the-climax.mp3';
+
+/** Title-screen demo camera: tiles visible top to bottom, and seconds per ghost. */
+const DEMO_TILES_TALL = 11;
+const DEMO_FOCUS_TIME = 5;
 
 const dirAngle = (d: Dir, fallback: number): number => {
   switch (d) {
@@ -103,8 +107,6 @@ export class Game {
   private playerId: GhostId = 'blinky';
 
   private stance: Stance = 'hunt';
-  private pincerTimer = 0;
-  private pincerCd = 0;
   private frightTimer = 0;
 
   // Rules / progress.
@@ -130,13 +132,14 @@ export class Game {
   private wakaAlt = false;
   private menuSelect = 0;
   private demoStanceTimer = 0;
-  private demoPincerTimer = 3;
 
   // Presentation.
   private readonly world = new Container();
   private readonly backdrop = new Graphics();
   private readonly floorGrid = new Graphics();
   private readonly floorGlow = new Graphics();
+  /** This level's playfield colours. */
+  private theme: FieldTheme = themeForLevel(1);
   private readonly mazeFill = new Graphics();
   private readonly mazeGfx = new Graphics();
   private readonly wallDots = new Graphics();
@@ -164,6 +167,11 @@ export class Game {
   private dotsDirty = true;
   private elapsed = 0;
   private camY = 0;
+  /** Title-screen demo: the framed area, the ghost in focus, and the camera. */
+  private readonly demoMask = new Graphics();
+  private demoFocus = 0;
+  private demoFocusT = 0;
+  private demoCam: { x: number; y: number } | null = null;
   private pacAngle = dirAngle('left', Math.PI);
   private muted = false;
   private lastFps = 60;
@@ -204,6 +212,7 @@ export class Game {
 
     this.buildMaze();
     this.buildBackdrop();
+    this.layoutDemoMask();
 
     // Stage layering: menu background → world → HUD → menu UI → flash.
     app.stage.addChild(
@@ -214,6 +223,7 @@ export class Game {
       this.hud.layer,
       this.menu.uiLayer,
       this.fx.flashLayer,
+      this.demoMask,
     );
     this.fx.layer.visible = true;
     this.world.addChild(this.fx.layer);
@@ -306,15 +316,25 @@ export class Game {
     rows.forEach((segs, r) => {
       if (!segs.length) return;
       for (const [x1, y1, x2, y2] of segs) g.moveTo(x1, y1).lineTo(x2, y2);
-      const col = tint(lerpColor(PALETTE.wallTop, PALETTE.wallBot, r / (ROWS - 1)));
+      const col = tint(lerpColor(this.theme.top, this.theme.bottom, r / (ROWS - 1)));
       g.stroke({ width, color: col, alpha, cap: 'round', join: 'round' });
     });
   }
 
+  /** Repaint the playfield in the theme for `level` (a new one each level). */
+  private applyTheme(level: number): void {
+    const theme = themeForLevel(level);
+    if (theme === this.theme) return;
+    this.theme = theme;
+    this.buildMaze();
+  }
+
   private buildMaze(): void {
+    this.mazeFill.clear();
+    this.mazeGfx.clear();
     // Solid fill, row-tinted for a vertical gradient.
     for (let r = 0; r < ROWS; r++) {
-      const col = lerpColor(0x120727, 0x1f0c3c, r / (ROWS - 1));
+      const col = lerpColor(this.theme.fillTop, this.theme.fillBottom, r / (ROWS - 1));
       for (let c = 0; c < COLS; c++) {
         if (this.maze.kindAt(c, r) === WALL) {
           this.mazeFill.rect(c * TILE, r * TILE, TILE, TILE).fill(col);
@@ -345,13 +365,13 @@ export class Game {
     grid.clear();
     for (let x = 0; x <= COLS; x++) grid.moveTo(x * TILE, -TILE).lineTo(x * TILE, WORLD_H + TILE);
     for (let y = -1; y <= ROWS + 1; y++) grid.moveTo(0, y * TILE).lineTo(WORLD_W, y * TILE);
-    grid.stroke({ width: 1, color: PALETTE.grid, alpha: 0.075 });
+    grid.stroke({ width: 1, color: this.theme.top, alpha: 0.075 });
 
     const glow = this.floorGlow;
     glow.clear();
     const spill = [3, 7, 12];
     for (let r = 0; r < ROWS; r++) {
-      const col = lerpColor(PALETTE.wallTop, PALETTE.wallBot, r / (ROWS - 1));
+      const col = lerpColor(this.theme.top, this.theme.bottom, r / (ROWS - 1));
       for (let c = 0; c < COLS; c++) {
         if (this.isWallTile(c, r)) continue;
         // Out-of-bounds tiles (the tunnel mouths) aren't walls: no spill there.
@@ -429,7 +449,7 @@ export class Game {
 
             this.wallDots
               .circle(c * TILE + fx * TILE + ox, r * TILE + fy * TILE + oy, 0.7 + k * 1.5)
-              .fill({ color: PALETTE.accent2, alpha: 0.05 + k * 0.09 });
+              .fill({ color: this.theme.accent, alpha: 0.05 + k * 0.09 });
           }
         }
       }
@@ -518,6 +538,8 @@ export class Game {
 
   private enterAttract(): void {
     this.phase = 'menu';
+    this.applyTheme(1);
+    this.demoCam = null;
     this.hud.layer.visible = false;
     this.menu.setVisible(true);
     for (const g of this.ghosts) g.isPlayer = false;
@@ -535,6 +557,7 @@ export class Game {
     this.audio.uiConfirm();
     this.score = 0;
     this.level = 1;
+    this.applyTheme(this.level);
     this.lives = PLAYER_LIVES;
     this.nextLifeAt = EXTRA_LIFE_EVERY;
     this.gameOverPending = false;
@@ -557,8 +580,6 @@ export class Game {
     for (const g of this.ghosts) g.spawn(this.level);
     this.frightTimer = 0;
     this.pac.powered = false;
-    this.pincerTimer = 0;
-    this.pincerCd = 0;
     this.abilityWasReady = true;
     this.nav.clear();
 
@@ -570,6 +591,7 @@ export class Game {
 
   private newLevel(): void {
     this.level++;
+    this.applyTheme(this.level);
     this.pacLives = PAC_LIVES;
     this.maze.resetDots();
     this.dotsDirty = true;
@@ -580,6 +602,8 @@ export class Game {
   }
 
   private gameOver(): void {
+    this.demoCam = null;
+    this.applyTheme(1);
     this.gameOverPending = false;
     this.freezeTimer = 0;
     this.phase = 'gameover';
@@ -654,16 +678,6 @@ export class Game {
   private cycleStance(dir: number): void {
     const i = STANCE_ORDER.indexOf(this.stance);
     this.setStance(STANCE_ORDER[(i + dir + STANCE_ORDER.length) % STANCE_ORDER.length]);
-  }
-
-  private triggerPincer(): void {
-    this.pincerTimer = PINCER_TIME;
-    this.pincerCd = PINCER_COOLDOWN;
-    this.audio.pincer();
-    this.fx.flash(PALETTE.accent2, 0.4, 0.35);
-    this.fx.shake(6, 0.35);
-    this.fx.ring(this.playerGhost.px, this.playerGhost.py, PALETTE.accent2, TILE * 6, 0.7, 4);
-    this.flashMessage('PINCER!', 'SQUAD CONVERGING', PALETTE.accent2, PINCER_TIME);
   }
 
   private useAbility(): void {
@@ -763,7 +777,6 @@ export class Game {
       ghosts: this.ghosts,
       fields,
       stance: this.stance,
-      pincer: this.pincerTimer > 0,
       playerId: this.playerId,
       level: this.level,
     };
@@ -853,19 +866,13 @@ export class Game {
       return;
     }
 
-    // Live demo: all four ghosts hunt, stances rotate, pincers fire.
+    // Live demo: all four ghosts hunt, stances rotate.
     this.demoStanceTimer -= dt;
     if (this.demoStanceTimer <= 0) {
       this.demoStanceTimer = 5 + Math.random() * 3;
       this.stance = STANCE_ORDER[(Math.random() * STANCE_ORDER.length) | 0];
       if (Math.random() < 0.5) this.stance = 'hunt';
     }
-    this.demoPincerTimer -= dt;
-    if (this.demoPincerTimer <= 0) {
-      this.demoPincerTimer = 9 + Math.random() * 5;
-      this.pincerTimer = PINCER_TIME;
-    }
-    if (this.pincerTimer > 0) this.pincerTimer -= dt;
 
     this.pac.powered = this.frightTimer > 0;
     if (this.frightTimer > 0) {
@@ -924,7 +931,6 @@ export class Game {
     if (input.justPressed('Digit4')) this.setStance('guard');
     if (input.anyPressed('KeyE')) this.cycleStance(1);
     if (input.anyPressed('KeyQ')) this.cycleStance(-1);
-    if (input.justPressed('Space') && this.pincerCd <= 0 && this.pincerTimer <= 0) this.triggerPincer();
     if (input.anyPressed('ShiftLeft', 'ShiftRight')) this.useAbility();
     if (input.anyPressed('KeyP', 'Escape')) {
       this.phase = 'paused';
@@ -933,8 +939,6 @@ export class Game {
     }
 
     // --- Timers ---
-    if (this.pincerTimer > 0) this.pincerTimer -= dt;
-    if (this.pincerCd > 0) this.pincerCd = Math.max(0, this.pincerCd - dt);
     if (this.msgTimer > 0) {
       this.msgTimer -= dt;
       if (this.msgTimer <= 0) {
@@ -1093,8 +1097,7 @@ export class Game {
   }
 
   private onPacCaught(): void {
-    const combo = this.pincerTimer > 0 ? 2 : 1;
-    const pts = 200 * this.level * combo;
+    const pts = 200 * this.level;
     this.addScore(pts);
     this.audio.catchPac();
     this.fx.flash(PALETTE.gold, 0.55, 0.25);
@@ -1102,7 +1105,7 @@ export class Game {
     this.fx.burst(this.pac.px, this.pac.py, PALETTE.pac, 44, { speed: 280, life: 0.8, size: 4 });
     this.fx.ring(this.pac.px, this.pac.py, PALETTE.gold, TILE * 4, 0.6, 4);
     this.fx.ring(this.pac.px, this.pac.py, PALETTE.accent, TILE * 2.4, 0.45, 2);
-    this.fx.pop(`+${pts}${combo > 1 ? ' ×2' : ''}`, this.pac.px, this.pac.py - 24, PALETTE.gold, 20);
+    this.fx.pop(`+${pts}`, this.pac.px, this.pac.py - 24, PALETTE.gold, 20);
 
     this.pac.alive = false;
     this.pac.deathT = 0;
@@ -1156,20 +1159,60 @@ export class Game {
   // Rendering
   // -------------------------------------------------------------------------
 
+  /** The title-screen demo's frame: below the header, left of the panel. */
+  private layoutDemoMask(): void {
+    this.demoMask.clear().rect(0, HEADER_H, VIEW_W, SCREEN_H - HEADER_H).fill(PALETTE.white);
+  }
+
+  /** The ghost the title-screen camera follows: a new one every few seconds. */
+  private demoTarget(dt: number): { x: number; y: number } {
+    const outside = (g: Ghost): boolean => g.state !== 'house';
+    this.demoFocusT -= dt;
+    if (this.demoFocusT <= 0 || !outside(this.ghosts[this.demoFocus])) {
+      this.demoFocusT = DEMO_FOCUS_TIME;
+      for (let i = 1; i <= this.ghosts.length; i++) {
+        const j = (this.demoFocus + i) % this.ghosts.length;
+        if (outside(this.ghosts[j])) {
+          this.demoFocus = j;
+          break;
+        }
+      }
+    }
+    const g = this.ghosts[this.demoFocus];
+    return { x: g.px, y: g.py };
+  }
+
   private render(dt: number): void {
     const shake = this.fx.updateShake(dt);
     const demo = this.phase === 'menu' || this.phase === 'gameover';
 
     if (demo) {
-      // Title screen: present the whole board, scaled to the viewport.
-      const scale = Math.min((VIEW_W - 20) / WORLD_W, (SCREEN_H - 20) / WORLD_H);
-      this.world.alpha = 0.62;
+      // Title screen: a close shot that drifts from ghost to ghost, framed in
+      // the space below the header and left of the panel.
+      const viewH = SCREEN_H - HEADER_H;
+      const scale = viewH / (DEMO_TILES_TALL * TILE);
+      const focus = this.demoTarget(dt);
+      const clampAxis = (v: number, half: number, size: number): number =>
+        half * 2 >= size ? size / 2 : Math.max(half, Math.min(size - half, v));
+      const tx = clampAxis(focus.x, VIEW_W / 2 / scale, WORLD_W);
+      const ty = clampAxis(focus.y, viewH / 2 / scale, WORLD_H);
+      // Snap on the first frame and across the tunnel wrap; glide otherwise.
+      if (!this.demoCam || Math.abs(tx - this.demoCam.x) > WORLD_W / 2) this.demoCam = { x: tx, y: ty };
+      const k = Math.min(1, dt * 3);
+      this.demoCam.x += (tx - this.demoCam.x) * k;
+      this.demoCam.y += (ty - this.demoCam.y) * k;
+      this.world.alpha = 0.8;
       this.world.scale.set(scale);
       this.world.position.set(
-        (VIEW_W - WORLD_W * scale) / 2 + shake.x,
-        (SCREEN_H - WORLD_H * scale) / 2 + shake.y,
+        VIEW_W / 2 - this.demoCam.x * scale + shake.x,
+        HEADER_H + viewH / 2 - this.demoCam.y * scale + shake.y,
       );
+      this.demoMask.visible = true;
+      this.world.mask = this.demoMask;
     } else {
+      // Out of use as a mask it would draw as a plain white rectangle.
+      this.world.mask = null;
+      this.demoMask.visible = false;
       // Vertically scrolling camera: frame the player and Pac-Man together.
       const visibleH = SCREEN_H / MAZE_ZOOM;
       const focusY = this.playerGhost.py * 0.68 + this.pac.py * 0.32;
@@ -1466,9 +1509,6 @@ export class Game {
       lives: this.lives,
       pacLives: this.pacLives,
       stance: this.stance,
-      pincerReady: this.pincerCd <= 0 && this.pincerTimer <= 0,
-      pincerCd: this.pincerCd,
-      pincerMax: PINCER_COOLDOWN,
       abilityName: banished ? 'BANISHED' : pg ? pg.def.abilityName : '',
       abilityLocked: !!pg && pg.state !== 'normal',
       abilityReady: pg ? pg.cooldown <= 0 && pg.state === 'normal' : false,
@@ -1528,6 +1568,7 @@ export class Game {
   /** Re-run every width-dependent layout after a viewport change. */
   layout(): void {
     this.buildBackdrop();
+    this.layoutDemoMask();
     this.hud.layout();
     this.menu.layout();
     this.fx.resize(SCREEN_W, SCREEN_H);

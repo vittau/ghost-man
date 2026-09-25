@@ -41,6 +41,9 @@ async function boot(): Promise<void> {
     resolution: resolutionFor(SCREEN_W, SCREEN_H),
     autoDensity: false,
     preference: 'webgl',
+    // Lets backdrop filters read what's already drawn (the title screen's
+    // frosted header and panel).
+    useBackBuffer: true,
     powerPreference: 'high-performance',
   });
   app.ticker.maxFPS = 60;

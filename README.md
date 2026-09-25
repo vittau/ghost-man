@@ -37,7 +37,6 @@ Other scripts:
 | Arrows / WASD | Move your ghost |
 | `1`–`4` | Squad stance: HUNT / AMBUSH / FLANK / GUARD |
 | `Q` / `E` | Cycle stance |
-| `Space` | **PINCER!** — the squad converges on Pac-Man |
 | `Shift` | Signature ability (depends on your ghost) |
 | `P` / `Esc` | Pause |
 | `M` | Skip to the next song (in game) |

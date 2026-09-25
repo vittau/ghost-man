@@ -22,9 +22,6 @@ export interface HudState {
   lives: number;
   pacLives: number;
   stance: Stance;
-  pincerReady: boolean;
-  pincerCd: number;
-  pincerMax: number;
   abilityName: string;
   abilityReady: boolean;
   abilityLocked: boolean;
@@ -49,12 +46,11 @@ export interface HudState {
 // recomputes the horizontal ones so the panel tracks the window width.
 // Sized for a 7" 1280x800 handheld: nothing smaller than 10px.
 const STANCE_ROW_Y = [138, 178, 218, 258];
-const GHOST_BOX_Y = 408;
+const GHOST_BOX_Y = 376;
 const GHOST_BOX_H = 118;
-const PINCER_BAR_Y = 318;
-const ABILITY_BAR_Y = 376;
+const ABILITY_BAR_Y = 344;
 const ABILITY_GLOW_MS = 900;
-const LIVES_Y = 544;
+const LIVES_Y = 512;
 
 const mkText = (
   text: string,
@@ -93,7 +89,6 @@ export class Hud {
   private readonly stanceNames: Text[] = [];
   private readonly stanceDescs: Text[] = [];
   private readonly barsKeyLabels: Text[] = [];
-  private readonly pincerLabel = mkText('PINCER [SPACE]', 10, PALETTE.textDim);
   private readonly abilityLabel = mkText('ABILITY [SHIFT]', 10, PALETTE.textDim);
   private readonly abilityValue = mkText('', 13, PALETTE.gold);
   private readonly yourGhostLabel = mkText('YOUR GHOST', 11, PALETTE.accent2);
@@ -154,7 +149,6 @@ export class Hud {
       this.levelLabel,
       this.levelValue,
       this.squadTitle,
-      this.pincerLabel,
       this.abilityLabel,
       this.abilityValue,
       this.yourGhostLabel,
@@ -196,7 +190,7 @@ export class Hud {
     }
 
     this.dividers.clear();
-    for (const y of [104, 396, 534, 616]) {
+    for (const y of [104, 364, 502, 584]) {
       this.dividers.rect(this.panelX + 20, y, HUD_W - 40, 1).fill({ color: PALETTE.accent, alpha: 0.2 });
     }
 
@@ -216,7 +210,6 @@ export class Hud {
       this.barsKeyLabels[i].position.set(x + 11, y + 13);
     });
 
-    this.pincerLabel.position.set(x, PINCER_BAR_Y - 18);
     this.abilityLabel.position.set(x, ABILITY_BAR_Y - 40);
     this.abilityValue.position.set(x, ABILITY_BAR_Y - 22);
 
@@ -231,9 +224,9 @@ export class Hud {
 
     this.livesLabel.position.set(x, LIVES_Y);
     this.pacLivesLabel.position.set(col2, LIVES_Y);
-    this.keyHint1.position.set(x, 630);
-    this.keyHint2.position.set(x, 650);
-    this.trackText.position.set(x, 680);
+    this.keyHint1.position.set(x, 598);
+    this.keyHint2.position.set(x, 618);
+    this.trackText.position.set(x, 648);
     this.fpsText.position.set(18, 12);
 
     this.message.position.set(VIEW_W / 2, 330);
@@ -314,7 +307,6 @@ export class Hud {
       this.bars.roundRect(10, 6, 84, 20, 4).stroke({ width: 1, color: PALETTE.accent2, alpha: 0.4 });
     }
 
-    this.ledBar(PINCER_BAR_Y, s.pincerReady ? 1 : 1 - s.pincerCd / s.pincerMax, s.pincerReady ? PALETTE.accent2 : PALETTE.accent);
     if (s.abilityLocked) {
       this.ledBar(ABILITY_BAR_Y, 1, PALETTE.danger, 0.3);
     } else {
