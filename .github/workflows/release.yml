@@ -24,7 +24,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Steam Deck / desktop Linux: one AppImage, x64 (the Deck's arch).
+          # Steam Deck / desktop Linux: a .tar.xz of the app folder, x64.
           - os: ubuntu-24.04
             platform: linux
           - os: windows-2025
@@ -65,11 +65,21 @@ jobs:
           npx electron-builder --${{ matrix.platform }} --publish never
           -c.extraMetadata.version=${{ steps.ver.outputs.version }}
 
+      - name: Pack the Linux folder
+        if: matrix.platform == 'linux'
+        working-directory: release
+        env:
+          XZ_OPT: -9 -T0
+        run: >-
+          tar --transform 's,^linux-unpacked,Ghost-Man,'
+          -cJf "Ghost-Man-${{ steps.ver.outputs.version }}-linux-x64.tar.xz"
+          linux-unpacked
+
       - uses: actions/upload-artifact@v7
         with:
           name: ghost-man-${{ matrix.platform }}
           path: |
-            release/*.AppImage
+            release/*.tar.xz
             release/*.exe
             release/*.dmg
           if-no-files-found: error

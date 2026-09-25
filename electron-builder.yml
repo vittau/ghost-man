@@ -28,15 +28,16 @@ electronFuses:
   grantFileProtocolExtraPrivileges: false
 
 linux:
-  # Steam Deck: add the AppImage as a Non-Steam Game from Desktop Mode.
+  # Steam Deck: a plain folder with the `ghost-man` binary. CI packs it as
+  # Ghost-Man/ in a .tar.xz (release.yml): a fixed folder name, so extracting
+  # an update over it keeps the Steam shortcut working.
   target:
-    - target: AppImage
+    - target: dir
       arch: [x64]
   category: Game
   executableName: ghost-man
   syncDesktopName: true
   synopsis: Arcade game where you are the ghost
-  artifactName: Ghost-Man-${version}-linux-${arch}.${ext}
 
 win:
   target:

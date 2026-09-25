@@ -194,7 +194,7 @@ The Electron shell (`electron/main.js`) loads the same `dist/` bundle:
   download; `electronLanguages` and per-arch DMGs trim what can be trimmed.
 
 `npm version X.Y.Z && git push --follow-tags` releases:
-`.github/workflows/release.yml` builds one job per OS (AppImage for the Deck,
+`.github/workflows/release.yml` builds one job per OS (a `Ghost-Man/` folder in a `.tar.xz` for the Deck,
 NSIS + portable for Windows, arm64 + x64 DMGs for macOS), stamps the tag's
 version with `-c.extraMetadata.version`, and publishes a GitHub release with
 `SHA256SUMS.txt`. The builds are unsigned (macOS ad-hoc), so the README

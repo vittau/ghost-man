@@ -29,7 +29,7 @@ Nothing to install; a keyboard or a controller both work.
 
 | System | File |
 | --- | --- |
-| Steam Deck / Linux | `Ghost-Man-…-linux-x86_64.AppImage` |
+| Steam Deck / Linux | `Ghost-Man-…-linux-x64.tar.xz` |
 | Windows | `Ghost-Man-…-windows-x64-setup.exe` (installer) or `…-portable.exe` |
 | macOS (Apple Silicon) | `Ghost-Man-…-macos-arm64.dmg` |
 | macOS (Intel) | `Ghost-Man-…-macos-x64.dmg` |
@@ -54,14 +54,17 @@ The game is laid out for the Deck's 1280×800 screen and reads the controller
 directly, with no Steam Input template needed.
 
 1. Switch to **Desktop Mode** (Steam button → Power → Switch to Desktop).
-2. Download the `.AppImage` from
-   [Releases](https://github.com/vittau/ghost-man/releases/latest).
-3. In the file manager, right-click it → **Properties → Permissions** →
-   tick **Is executable**.
-4. Right-click it again → **Add to Steam**. (Or, in Steam: *Games → Add a
-   Non-Steam Game to My Library…* and browse to the file.)
-5. Head back to **Gaming Mode**. Ghost-Man is in your library under
+2. Download the `.tar.xz` from
+   [Releases](https://github.com/vittau/ghost-man/releases/latest), then
+   right-click it → **Extract → Extract archive here**. You get a
+   `Ghost-Man` folder; move it wherever you keep games.
+3. Inside it, right-click **`ghost-man`** → **Add to Steam**. (Or, in Steam:
+   *Games → Add a Non-Steam Game to My Library…* and browse to that file.)
+4. Head back to **Gaming Mode**. Ghost-Man is in your library under
    *Non-Steam*.
+
+To update, extract the new version over the same folder: the Steam
+shortcut keeps working.
 
 If the buttons act like a keyboard, open the game's controller settings and
 pick the **Gamepad** layout. To leave, use **QUIT GAME** on the pause screen
