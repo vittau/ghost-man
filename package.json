@@ -1,0 +1,22 @@
+{
+  "name": "gorgeous-ghost-man",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Ghost-Man: a gorgeous, procedurally-rendered arcade game where you command the ghosts.",
+  "scripts": {
+    "dev": "vite",
+    "start": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 4173",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "pixi-filters": "^6.1.5",
+    "pixi.js": "^8.21.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vite": "^7.1.12"
+  }
+}
