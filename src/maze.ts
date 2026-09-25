@@ -33,6 +33,8 @@ export class Maze {
   dotsTotal = 0;
   powerLeft = 0;
   powerTotal = 0;
+  /** Floor reachable without the ghost door: everywhere but the house. */
+  private readonly outside: Uint8Array;
 
   constructor() {
     const n = COLS * ROWS;
@@ -54,6 +56,8 @@ export class Maze {
     }
 
     this.pruneUnreachable();
+    const out = this.field([PAC_START], false);
+    this.outside = Uint8Array.from(out, (d) => (d >= 0 ? 1 : 0));
     this.baseDots = this.dots.slice();
     this.recount();
   }
@@ -139,6 +143,31 @@ export class Maze {
     if (k === WALL) return false;
     if (k === DOOR) return ghostPass;
     return true;
+  }
+
+  /**
+   * The open floor tile nearest to `t` (which may lie inside a wall, inside
+   * the ghost house or off the board). AI targets go through this so a path
+   * always exists: BFS toward a target buried in a thick wall, or locked in
+   * the house, reaches nothing and the ghost wanders.
+   */
+  nearestOpen(t: TilePos): TilePos {
+    const cx = Math.max(0, Math.min(COLS - 1, t.x));
+    const cy = Math.max(0, Math.min(ROWS - 1, t.y));
+    if (this.outside[idx(cx, cy)]) return { x: cx, y: cy };
+    let best: TilePos = { x: cx, y: cy };
+    let bd = Infinity;
+    for (let i = 0; i < this.kind.length; i++) {
+      if (!this.outside[i]) continue;
+      const x = i % COLS;
+      const y = (i / COLS) | 0;
+      const d = (x - t.x) * (x - t.x) + (y - t.y) * (y - t.y);
+      if (d < bd) {
+        bd = d;
+        best = { x, y };
+      }
+    }
+    return best;
   }
 
   /** 0 = nothing, 1 = dot, 2 = power pellet. */

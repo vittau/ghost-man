@@ -786,7 +786,7 @@ export class Game {
     this.nav.clear();
     this.pac.update(dt, ctx);
     for (const g of this.ghosts) {
-      if (g.state === 'frightened') g.frightTimer = this.frightTimer;
+      if (g.state === 'frightened' || (g.state === 'leaving' && g.frightTimer > 0)) g.frightTimer = this.frightTimer;
       g.update(dt, ctx);
     }
   }

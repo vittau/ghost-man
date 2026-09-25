@@ -226,7 +226,7 @@ export const GHOSTS: GhostDef[] = [
 export const STANCE_ORDER: Stance[] = ['hunt', 'ambush', 'flank', 'guard'];
 
 export const STANCE_INFO: Record<Stance, { name: string; desc: string; key: string }> = {
-  hunt: { name: 'HUNT', desc: 'Direct pursuit', key: '1' },
+  hunt: { name: 'HUNT', desc: 'Classic chase', key: '1' },
   ambush: { name: 'AMBUSH', desc: 'Cut him off', key: '2' },
   flank: { name: 'FLANK', desc: 'Take his escape', key: '3' },
   guard: { name: 'GUARD', desc: 'Camp the pellets', key: '4' },

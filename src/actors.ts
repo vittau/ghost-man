@@ -48,12 +48,186 @@ export interface SimContext {
   stance: Stance;
   playerId: GhostId;
   level: number;
+  /** The squad's stance targets, worked out once per frame (see squadPlan). */
+  plan?: Map<GhostId, TilePos>;
 }
 
 const dist = (ax: number, ay: number, bx: number, by: number): number =>
   Math.hypot(ax - bx, ay - by);
 
 const DASH_BOOST = 1.75;
+
+// ---------------------------------------------------------------------------
+// Squad orders. AMBUSH, FLANK and GUARD are team plays: each AI ghost gets its
+// own spot, so they spread out instead of queueing for the same tile.
+// ---------------------------------------------------------------------------
+
+/** How far ahead (tiles) AMBUSH reads Pac-Man's route. */
+const AMBUSH_LOOKAHEAD = 24;
+/** Pac-Man tiles that pass while an AI ghost covers one (they're slower). */
+const GHOST_PACE = SPEED.pac / SPEED.ghost;
+/** Within this many tiles of Pac-Man an ambusher stops cutting and charges. */
+const AMBUSH_CHARGE = 6;
+
+/**
+ * Where Pac-Man is headed: straight on while he can, and at a corner or T the
+ * turn toward the nearer pellets (his usual pull when unthreatened).
+ */
+function predictRoute(ctx: SimContext): TilePos[] {
+  const { maze, fields } = ctx;
+  const m = ctx.pac.mover;
+  let dir: UnitDir = m.dir !== 'none' ? m.dir : m.want !== 'none' ? m.want : 'left';
+  let cur = m.nextTile;
+  const route = [cur];
+  const seen = new Set([maze.index(cur.x, cur.y)]);
+  for (let i = 0; i < AMBUSH_LOOKAHEAD; i++) {
+    let next: UnitDir | null = m.canEnterFrom(cur.x, cur.y, dir) ? dir : null;
+    if (!next) {
+      const side: UnitDir[] = dir === 'left' || dir === 'right' ? ['up', 'down'] : ['left', 'right'];
+      let best = Infinity;
+      for (const d of side) {
+        if (!m.canEnterFrom(cur.x, cur.y, d)) continue;
+        const n = neighborOf(cur.x, cur.y, d);
+        const v = fields.dot ? fieldAt(maze, fields.dot, n.x, n.y) : 0;
+        const score = v < 0 ? 999 : v;
+        if (score < best) {
+          best = score;
+          next = d;
+        }
+      }
+    }
+    if (!next) break;
+    cur = neighborOf(cur.x, cur.y, next);
+    dir = next;
+    const k = maze.index(cur.x, cur.y);
+    if (seen.has(k)) break;
+    seen.add(k);
+    route.push(cur);
+  }
+  return route;
+}
+
+/**
+ * The ways out of where Pac-Man is: from his tile, follow each open direction
+ * to the first junction. In a corridor that's both ends; at a junction, the
+ * next junction down every branch.
+ */
+function escapePoints(ctx: SimContext): TilePos[] {
+  const { maze } = ctx;
+  const m = ctx.pac.mover;
+  const exits = (x: number, y: number): UnitDir[] => DIR_ORDER.filter((d) => m.canEnterFrom(x, y, d));
+  const start = m.tile;
+  const out: TilePos[] = [];
+  const seen = new Set<number>();
+  for (const d0 of exits(start.x, start.y)) {
+    let cur = neighborOf(start.x, start.y, d0);
+    let dir = d0;
+    for (let i = 0; i < 20; i++) {
+      const open = exits(cur.x, cur.y);
+      if (open.length >= 3) break;
+      const onward = open.find((d) => d !== OPPOSITE[dir]);
+      if (!onward) break;
+      dir = onward;
+      cur = neighborOf(cur.x, cur.y, dir);
+    }
+    const k = maze.index(cur.x, cur.y);
+    if (!seen.has(k)) {
+      seen.add(k);
+      out.push(cur);
+    }
+  }
+  return out;
+}
+
+/** Hand out distinct spots, cheapest ghost-spot pair first. */
+function assignSpots(
+  squad: Ghost[],
+  spots: TilePos[],
+  cost: (g: Ghost, p: TilePos) => number,
+  plan: Map<GhostId, TilePos>,
+): Ghost[] {
+  const free = new Set(spots.map((_, i) => i));
+  let left = [...squad];
+  while (left.length && free.size) {
+    let pick: { g: Ghost; i: number; c: number } | null = null;
+    for (const g of left) {
+      for (const i of free) {
+        const c = cost(g, spots[i]);
+        if (c < Infinity && (!pick || c < pick.c)) pick = { g, i, c };
+      }
+    }
+    if (!pick) break;
+    plan.set(pick.g.id, spots[pick.i]);
+    free.delete(pick.i);
+    left = left.filter((g) => g !== pick.g);
+  }
+  return left;
+}
+
+/** Targets for this frame's stance; ghosts left without a spot pursue him directly. */
+function squadPlan(ctx: SimContext): Map<GhostId, TilePos> {
+  if (ctx.plan) return ctx.plan;
+  const plan = new Map<GhostId, TilePos>();
+  ctx.plan = plan;
+  const { maze } = ctx;
+  const squad = ctx.ghosts.filter((g) => !g.isPlayer && g.state === 'normal');
+  if (!squad.length) return plan;
+  const reachField = new Map(squad.map((g) => [g.id, maze.field([g.mover.tile], false)]));
+  const reach = (g: Ghost, p: TilePos): number => {
+    const v = (reachField.get(g.id) as Int32Array)[maze.index(p.x, p.y)];
+    return v < 0 ? Infinity : v;
+  };
+
+  let rest: Ghost[] = squad;
+  const stance = ctx.stance === 'guard' && maze.powerLeft === 0 ? 'ambush' : ctx.stance;
+  if (stance === 'ambush') {
+    // A ghost already close charges him. The others each take the earliest
+    // point on his route they can reach before he does, at least two tiles
+    // from anyone else's; failing that, the far end.
+    const route = predictRoute(ctx);
+    const lead = ctx.pac.mover.t > 0 ? 1 - ctx.pac.mover.t : 0;
+    const taken: number[] = [];
+    const order = [...squad].sort(
+      (a, b) => Math.min(...route.map((p) => reach(a, p))) - Math.min(...route.map((p) => reach(b, p))),
+    );
+    rest = [];
+    for (const g of order) {
+      if (reach(g, ctx.pac.mover.tile) <= AMBUSH_CHARGE) {
+        rest.push(g);
+        continue;
+      }
+      let chosen = -1;
+      for (let i = 0; i < route.length; i++) {
+        if (taken.some((j) => Math.abs(j - i) < 2)) continue;
+        if (reach(g, route[i]) * GHOST_PACE <= lead + i) {
+          chosen = i;
+          break;
+        }
+      }
+      if (chosen < 0) {
+        for (let i = route.length - 1; i >= 0; i--) {
+          if (!taken.some((j) => Math.abs(j - i) < 2)) {
+            chosen = i;
+            break;
+          }
+        }
+      }
+      if (chosen < 0) rest.push(g);
+      else {
+        taken.push(chosen);
+        plan.set(g.id, route[chosen]);
+      }
+    }
+  } else if (stance === 'flank') {
+    // Seal his exits: one ghost per way out, whoever gets there soonest.
+    rest = assignSpots(squad, escapePoints(ctx), reach, plan);
+  } else if (stance === 'guard') {
+    // One ghost per remaining power pellet, nearest first.
+    rest = assignSpots(squad, maze.powerTiles(), reach, plan);
+  }
+  for (const g of rest) plan.set(g.id, ctx.pac.mover.tile);
+  return plan;
+}
 
 /** AI ghosts speed up a little each level. */
 const levelSpeedUp = (level: number): number => Math.min(1.35, 1 + (level - 1) * 0.045);
@@ -519,7 +693,11 @@ export class Ghost {
   }
 
   frighten(): void {
-    if (this.state === 'normal' || this.state === 'leaving') {
+    if (this.state === 'leaving') {
+      // Still in the house: keep the way out through the door (a frightened
+      // ghost may not use it) and turn blue on reaching the maze.
+      this.frightTimer = FRIGHT_TIME;
+    } else if (this.state === 'normal') {
       this.state = 'frightened';
       this.frightTimer = FRIGHT_TIME;
       this.flash = false;
@@ -598,30 +776,8 @@ export class Ghost {
     const pacTile = { x: ctx.pac.mover.tx, y: ctx.pac.mover.ty };
     const pacDir: UnitDir = ctx.pac.mover.dir === 'none' ? 'left' : (ctx.pac.mover.dir as UnitDir);
 
-    switch (ctx.stance) {
-      case 'ambush':
-        return addTile(pacTile, DIRS[pacDir], 4);
-      case 'flank':
-        return addTile(pacTile, DIRS[pacDir], -4);
-      case 'guard': {
-        const power = ctx.maze.powerTiles();
-        if (power.length) {
-          let best = power[0];
-          let bd = Infinity;
-          for (const p of power) {
-            const d = dist(p.x, p.y, this.mover.tx, this.mover.ty);
-            if (d < bd) {
-              bd = d;
-              best = p;
-            }
-          }
-          return best;
-        }
-        return addTile(pacTile, DIRS[pacDir], 4);
-      }
-      default:
-        return this.personalityTarget(ctx, pacTile, pacDir);
-    }
+    if (ctx.stance === 'hunt') return ctx.maze.nearestOpen(this.personalityTarget(ctx, pacTile, pacDir));
+    return squadPlan(ctx).get(this.id) ?? pacTile;
   }
 
   private personalityTarget(ctx: SimContext, pacTile: TilePos, pacDir: UnitDir): TilePos {
@@ -636,7 +792,7 @@ export class Ghost {
       }
       case 'clyde': {
         const d = dist(this.mover.tx, this.mover.ty, pacTile.x, pacTile.y);
-        return d > 8 ? pacTile : SCATTER.clyde;
+        return d >= 8 ? pacTile : SCATTER.clyde;
       }
       default:
         return pacTile;
@@ -734,6 +890,7 @@ export class Ghost {
       const d = dist(this.mover.tx, this.mover.ty, HOUSE_CENTER.x, HOUSE_CENTER.y);
       if (d < 1.2) {
         this.state = 'house';
+        this.frightTimer = 0;
         this.releaseTimer = -RESPAWN_BANISH;
         this.bobPhase = 0;
         this.mover.speed = SPEED.ghost;
@@ -743,7 +900,7 @@ export class Ghost {
     }
 
     if (this.state === 'leaving' && this.mover.ty <= HOUSE_DOOR.y) {
-      this.state = 'normal';
+      this.state = this.frightTimer > 0 ? 'frightened' : 'normal';
       this.mover.ghostPass = false;
     }
 
