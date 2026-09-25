@@ -50,17 +50,23 @@ export const TUNNEL_ROW = 14;
 export const SPEED = {
   pac: 8.6,
   pacPowered: 10.4,
+  pacFury: 11.4, // powered and closing in on his prey
   ghost: 8.0,
   ghostFright: 5.2,
   ghostEaten: 15.0,
   playerGhost: 8.6,
 };
 
+/** Ghosts slow to this fraction of their speed in the side tunnel. */
+export const TUNNEL_SLOW = 0.55;
+
 export const FRIGHT_TIME = 7.5;
 export const FRIGHT_FLASH = 2.2;
 
 export const PAC_LIVES = 3; // times you must catch Pac-Man to clear a level
-export const PLAYER_LIVES = 3; // hearts; lost when Pac-Man clears the maze
+export const PLAYER_LIVES = 3; // lost each time Pac-Man eats your ghost
+export const MAX_LIVES = 5;
+export const EXTRA_LIFE_EVERY = 2000; // points per bonus life
 export const RESPAWN_BANISH = 4.5; // seconds a caught ghost sits in the house
 export const READY_TIME = 2.0;
 
@@ -69,6 +75,7 @@ export const PINCER_COOLDOWN = 11.0;
 
 export const ABILITY_COOLDOWN = 8.0;
 export const ABILITY_TIME = 1.4;
+export const BLIND_TIME = 2.5; // Clyde's BLINDSIDE
 
 // Scatter / chase schedule (classic flavour).
 export const MODE_SCHEDULE: Array<{ mode: 'scatter' | 'chase'; time: number }> = [
@@ -133,7 +140,7 @@ export interface GhostDef {
   name: string;
   color: number;
   colorDark: number;
-  ability: 'dash' | 'blink' | 'phase' | 'decoy';
+  ability: 'dash' | 'warp' | 'phase' | 'blind';
   abilityName: string;
   abilityDesc: string;
   cooldown: number;
@@ -149,7 +156,7 @@ export const GHOSTS: GhostDef[] = [
     ability: 'dash',
     abilityName: 'SHADOW DASH',
     abilityDesc: 'Burst of raw speed',
-    cooldown: 6,
+    cooldown: 10,
     blurb: 'The shadow. Always on your tail.',
   },
   {
@@ -157,10 +164,10 @@ export const GHOSTS: GhostDef[] = [
     name: 'PINKY',
     color: 0xff79c8,
     colorDark: 0x8a2f68,
-    ability: 'blink',
-    abilityName: 'BLINK',
-    abilityDesc: 'Warp two tiles ahead',
-    cooldown: 7,
+    ability: 'warp',
+    abilityName: 'WARP',
+    abilityDesc: 'Jump to the corridor end',
+    cooldown: 10,
     blurb: 'The ambusher. Cuts you off.',
   },
   {
@@ -171,7 +178,7 @@ export const GHOSTS: GhostDef[] = [
     ability: 'phase',
     abilityName: 'PHASE',
     abilityDesc: 'Through one wall',
-    cooldown: 8,
+    cooldown: 10,
     blurb: 'The wildcard. Ignores the maze.',
   },
   {
@@ -179,11 +186,11 @@ export const GHOSTS: GhostDef[] = [
     name: 'CLYDE',
     color: 0xff9f43,
     colorDark: 0x8a4c14,
-    ability: 'decoy',
-    abilityName: 'DECOY',
-    abilityDesc: 'Lure Pac-Man with a phantom',
-    cooldown: 8,
-    blurb: 'The trickster. Plays with minds.',
+    ability: 'blind',
+    abilityName: 'BLINDSIDE',
+    abilityDesc: 'Blind Pac-Man for 2.5s',
+    cooldown: 10,
+    blurb: "The trickster. Now you don't."
   },
 ];
 

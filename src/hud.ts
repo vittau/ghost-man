@@ -2,9 +2,9 @@ import { Container, Graphics, Text } from 'pixi.js';
 import {
   FONT_FAMILY,
   HUD_W,
+  MAX_LIVES,
   PAC_LIVES,
   PALETTE,
-  PLAYER_LIVES,
   SCREEN_H,
   SCREEN_W,
   STANCE_INFO,
@@ -53,6 +53,7 @@ const GHOST_BOX_Y = 408;
 const GHOST_BOX_H = 118;
 const PINCER_BAR_Y = 318;
 const ABILITY_BAR_Y = 376;
+const ABILITY_GLOW_MS = 900;
 const LIVES_Y = 544;
 
 const mkText = (
@@ -111,6 +112,7 @@ export class Hud {
   private readonly frightBar = new Graphics();
 
   private panelX = 0;
+  private abilityGlowAt = -Infinity;
   private cx = 0;
   private cw = 0;
 
@@ -127,7 +129,7 @@ export class Hud {
       this.barsKeyLabels.push(t);
     }
 
-    for (let i = 0; i < PLAYER_LIVES; i++) {
+    for (let i = 0; i < MAX_LIVES; i++) {
       const v = new Graphics();
       this.lifeIcons.push(v);
       this.lifeLayer.addChild(v);
@@ -238,6 +240,16 @@ export class Hud {
     this.submessage.position.set(VIEW_W / 2, 378);
   }
 
+  /** Light up the ability meter: it just became usable again. */
+  flashAbility(): void {
+    this.abilityGlowAt = performance.now();
+  }
+
+  /** 1 → 0 over the ready flash. */
+  private abilityGlow(): number {
+    return Math.max(0, 1 - (performance.now() - this.abilityGlowAt) / ABILITY_GLOW_MS);
+  }
+
   update(s: HudState): void {
     this.scoreValue.text = String(s.score).padStart(6, '0');
     this.highValue.text = String(s.high).padStart(6, '0');
@@ -246,6 +258,7 @@ export class Hud {
     this.fpsText.text = `${Math.round(s.fps)} FPS`;
     this.abilityValue.text = s.abilityName;
     this.abilityValue.style.fill = s.abilityReady ? PALETTE.gold : PALETTE.textDim;
+    this.abilityValue.scale.set(1 + 0.18 * this.abilityGlow());
     this.abilityLabel.text = s.abilityLocked ? 'ABILITY LOCKED' : 'ABILITY [SHIFT]';
     this.abilityLabel.style.fill = s.abilityLocked ? PALETTE.danger : PALETTE.textDim;
     // Already formatted (and ♪-prefixed) by Game.audioHintText().
@@ -305,7 +318,21 @@ export class Hud {
     if (s.abilityLocked) {
       this.ledBar(ABILITY_BAR_Y, 1, PALETTE.danger, 0.3);
     } else {
-      this.ledBar(ABILITY_BAR_Y, s.abilityReady ? 1 : 1 - s.abilityCd / s.abilityMax, PALETTE.gold);
+      const glow = this.abilityGlow();
+      const color = lerpColor(PALETTE.gold, PALETTE.white, glow * 0.6);
+      this.ledBar(ABILITY_BAR_Y, s.abilityReady ? 1 : 1 - s.abilityCd / s.abilityMax, color);
+      if (glow > 0) {
+        // Ready flash: a halo that expands and fades, and a bright sweep
+        // running across the segments.
+        const y = ABILITY_BAR_Y;
+        const pad = 3 + (1 - glow) * 7;
+        this.bars.roundRect(this.cx - 3, y - 3, this.cw + 6, 16, 4).fill({ color: PALETTE.gold, alpha: 0.28 * glow });
+        this.bars
+          .roundRect(this.cx - pad, y - pad, this.cw + pad * 2, 10 + pad * 2, 5)
+          .stroke({ width: 2, color: PALETTE.gold, alpha: glow });
+        const sx = this.cx + this.cw * Math.min(1, (1 - glow) * 1.5);
+        this.bars.rect(Math.min(sx, this.cx + this.cw - 18), y - 2, 18, 14).fill({ color: PALETTE.white, alpha: 0.65 * glow });
+      }
     }
   }
 
@@ -354,7 +381,7 @@ export class Hud {
       v.visible = on;
       if (!on) return;
       v.clear();
-      v.position.set(this.cx + 13 + i * 32, LIVES_Y + 40);
+      v.position.set(this.cx + 13 + i * 28, LIVES_Y + 40);
       drawGhost(v, 12, { color: s.playerColor, dir: 'left', wave: 4 });
     });
 

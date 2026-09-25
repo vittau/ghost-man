@@ -1,4 +1,4 @@
-import { COLS, MAZE_LAYOUT, PAC_START, ROWS } from './config';
+import { COLS, MAZE_LAYOUT, PAC_START, ROWS, TUNNEL_ROW } from './config';
 import type { TilePos } from './types';
 
 export const WALL = 0;
@@ -6,6 +6,16 @@ export const FLOOR = 1;
 export const DOOR = 2;
 
 export const idx = (c: number, r: number): number => r * COLS + c;
+
+/** The side portal corridor, where ghosts slow down and Pac-Man doesn't. */
+export const isTunnel = (c: number, r: number): boolean => r === TUNNEL_ROW && (c < 6 || c > 21);
+
+const STEPS = [
+  [0, -1],
+  [0, 1],
+  [-1, 0],
+  [1, 0],
+] as const;
 
 /**
  * Static maze geometry plus the mutable pellet layer.
@@ -229,6 +239,94 @@ export class Maze {
     }
 
     return dist;
+  }
+
+  /**
+   * Arrival-time field (seconds) for one actor moving at `speed` tiles/s,
+   * seeded with a start delay per tile. Entering a tunnel tile costs
+   * 1/`tunnelFactor` as much, matching the ghost slowdown there. Dijkstra
+   * rather than BFS for that reason; -1 marks unreachable tiles.
+   */
+  travelTime(
+    seeds: Array<{ x: number; y: number; t: number }>,
+    speed: number,
+    tunnelFactor: number,
+    ghostPass = false,
+  ): Float32Array {
+    const time = new Float32Array(COLS * ROWS).fill(-1);
+    const passable = (i: number): boolean => {
+      const k = this.kind[i];
+      return k === FLOOR || (k === DOOR && ghostPass);
+    };
+
+    // Binary min-heap of (key, tile) with lazy deletion.
+    const hk: number[] = [];
+    const hv: number[] = [];
+    const push = (k: number, v: number): void => {
+      let i = hk.length;
+      hk.push(k);
+      hv.push(v);
+      while (i > 0) {
+        const p = (i - 1) >> 1;
+        if (hk[p] <= k) break;
+        hk[i] = hk[p];
+        hv[i] = hv[p];
+        i = p;
+      }
+      hk[i] = k;
+      hv[i] = v;
+    };
+    const pop = (): void => {
+      const k = hk.pop() as number;
+      const v = hv.pop() as number;
+      const len = hk.length;
+      if (len === 0) return;
+      let i = 0;
+      for (;;) {
+        let c = 2 * i + 1;
+        if (c >= len) break;
+        if (c + 1 < len && hk[c + 1] < hk[c]) c++;
+        if (hk[c] >= k) break;
+        hk[i] = hk[c];
+        hv[i] = hv[c];
+        i = c;
+      }
+      hk[i] = k;
+      hv[i] = v;
+    };
+
+    for (const s of seeds) {
+      if (s.y < 0 || s.y >= ROWS) continue;
+      const i = idx(this.wrapCol(s.x), s.y);
+      if (!passable(i) || (time[i] >= 0 && time[i] <= s.t)) continue;
+      time[i] = s.t;
+      push(time[i], i);
+    }
+
+    const step = 1 / speed;
+    const tunnelStep = step / tunnelFactor;
+    while (hk.length) {
+      const k = hk[0];
+      const i = hv[0];
+      pop();
+      if (k > time[i]) continue; // stale entry
+      const c = i % COLS;
+      const r = (i / COLS) | 0;
+      for (const [dc, dr] of STEPS) {
+        const nr = r + dr;
+        if (nr < 0 || nr >= ROWS) continue;
+        const nc = this.wrapCol(c + dc);
+        const ni = idx(nc, nr);
+        if (!passable(ni)) continue;
+        // Keys are rounded to float32 like the field, or the stale-entry check
+        // above would drop live entries.
+        const nt = Math.fround(k + (isTunnel(nc, nr) ? tunnelStep : step));
+        if (time[ni] >= 0 && time[ni] <= nt) continue;
+        time[ni] = nt;
+        push(nt, ni);
+      }
+    }
+    return time;
   }
 }
 

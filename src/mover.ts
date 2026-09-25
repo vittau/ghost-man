@@ -57,10 +57,15 @@ export class Mover {
   }
 
   canEnter(dir: UnitDir): boolean {
+    return this.canEnterFrom(this.tx, this.ty, dir);
+  }
+
+  /** Could this actor step from tile (x,y) into `dir`? */
+  canEnterFrom(x: number, y: number, dir: UnitDir): boolean {
     const d = DIRS[dir];
-    const nr = this.ty + d.y;
+    const nr = y + d.y;
     if (nr < 0 || nr >= ROWS) return false;
-    let nc = this.tx + d.x;
+    let nc = x + d.x;
     if (nc < 0) nc = COLS - 1;
     else if (nc >= COLS) nc = 0;
     const k = this.maze.kindAt(nc, nr);
@@ -83,6 +88,19 @@ export class Mover {
     this.dir = OPPOSITE[this.dir];
     this.t = 1 - this.t;
     this.wrap();
+  }
+
+  /**
+   * The tile where this actor's next turn can happen: the tile it is standing
+   * on at a centre, otherwise the one it is heading into.
+   */
+  get nextTile(): TilePos {
+    if (this.dir === 'none' || this.t === 0) return { x: this.tx, y: this.ty };
+    const d = DIRS[this.dir as UnitDir];
+    let x = this.tx + d.x;
+    if (x < 0) x = COLS - 1;
+    else if (x >= COLS) x = 0;
+    return { x, y: this.ty + d.y };
   }
 
   /** May this actor turn into `dir` right now? */

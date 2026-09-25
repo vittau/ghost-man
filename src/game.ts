@@ -3,9 +3,12 @@ import {
   ABILITY_TIME,
   CAM_MAX,
   COLS,
+  BLIND_TIME,
+  EXTRA_LIFE_EVERY,
   FRIGHT_TIME,
   GHOSTS,
   HOUSE_CENTER,
+  MAX_LIVES,
   MAZE_OFFSET_X,
   MAZE_ZOOM,
   PAC_LIVES,
@@ -27,7 +30,7 @@ import {
 import { lerpColor } from './color';
 import { Maze, NavCache, WALL } from './maze';
 import { centerOf } from './mover';
-import { Ghost, Pacman } from './actors';
+import { Ghost, Pacman, threatField } from './actors';
 import type { SimContext, SimFields } from './actors';
 import { drawDoor, drawGhost, drawGhostSilhouette, drawPacman, drawSparkle } from './draw';
 import { Fx } from './fx';
@@ -103,9 +106,6 @@ export class Game {
   private pincerTimer = 0;
   private pincerCd = 0;
   private frightTimer = 0;
-  private ghostsEaten = 0;
-  private decoy: { x: number; y: number } | null = null;
-  private decoyTimer = 0;
 
   // Rules / progress.
   phase: GamePhase = 'menu';
@@ -113,7 +113,12 @@ export class Game {
   private high = 0;
   private level = 1;
   private lives = PLAYER_LIVES;
+  private nextLifeAt = EXTRA_LIFE_EVERY;
   private pacLives = PAC_LIVES;
+  /** Was the player's ability usable last frame? (For the "ready" cue.) */
+  private abilityWasReady = true;
+  /** Game over is decided; it lands once the current hit-stop ends. */
+  private gameOverPending = false;
 
   // Timers.
   private readyTimer = 0;
@@ -145,7 +150,8 @@ export class Game {
   private readonly overlayGfx = new Graphics();
   private readonly intentGfx = new Graphics();
   private readonly pacView = new Graphics();
-  private readonly decoyView = new Graphics();
+  /** The "!" over Pac-Man while Clyde has him blinded. */
+  private readonly alertView = new Graphics();
   private readonly playerRing = new Graphics();
   private readonly ghostViews = new Map<GhostId, Graphics>();
   /** Recent on-screen positions per actor, newest last, for motion trails. */
@@ -180,7 +186,7 @@ export class Game {
     }
 
     this.actorLayer.addChildAt(this.trailGfx, 0);
-    this.actorLayer.addChild(this.playerRing, this.intentGfx, this.pacView, this.decoyView);
+    this.actorLayer.addChild(this.playerRing, this.intentGfx, this.pacView, this.alertView);
     this.world.addChild(
       this.floorGrid,
       this.floorGlow,
@@ -530,6 +536,8 @@ export class Game {
     this.score = 0;
     this.level = 1;
     this.lives = PLAYER_LIVES;
+    this.nextLifeAt = EXTRA_LIFE_EVERY;
+    this.gameOverPending = false;
     this.pacLives = PAC_LIVES;
     this.maze.resetDots();
     this.dotsDirty = true;
@@ -551,9 +559,7 @@ export class Game {
     this.pac.powered = false;
     this.pincerTimer = 0;
     this.pincerCd = 0;
-    this.ghostsEaten = 0;
-    this.decoy = null;
-    this.decoyTimer = 0;
+    this.abilityWasReady = true;
     this.nav.clear();
 
     // Snap the camera so a round never opens with a long pan.
@@ -574,6 +580,8 @@ export class Game {
   }
 
   private gameOver(): void {
+    this.gameOverPending = false;
+    this.freezeTimer = 0;
     this.phase = 'gameover';
     this.audio.gameOver();
     this.saveHigh();
@@ -602,12 +610,12 @@ export class Game {
     this.syncMusic();
   }
 
-  /** Point the music player at the right track for the current phase/level. */
+  /** Menu track on the title screen; the in-game playlist (never restarted) otherwise. */
   private syncMusic(): void {
     if (this.music.available) {
       this.audio.stopMusic();
       if (this.isAttract) this.music.playMenu();
-      else this.music.playForLevel(this.level);
+      else this.music.playGame();
     } else if (this.isAttract) {
       this.audio.stopMusic();
     } else {
@@ -671,39 +679,51 @@ export class Game {
         g.dashTimer = ABILITY_TIME;
         this.fx.burst(g.px, g.py, g.def.color, 22, { speed: 200, life: 0.5, size: 3 });
         break;
-      case 'blink': {
+      case 'warp': {
         const m = g.mover;
-        const d = (m.dir === 'none' ? 'left' : m.dir) as UnitDir;
-        let moved = false;
-        for (let i = 0; i < 2; i++) {
-          if (!m.canEnter(d)) break;
-          m.tx += DIRS[d].x;
-          m.ty += DIRS[d].y;
-          if (m.tx < 0) m.tx = COLS - 1;
-          else if (m.tx >= COLS) m.tx = 0;
-          moved = true;
-        }
-        m.t = 0;
-        if (moved) {
-          this.fx.flash(PALETTE.accent, 0.25, 0.2);
-          this.fx.burst(g.px, g.py, g.def.color, 26, { speed: 220, life: 0.5, size: 3 });
-        }
+        const d = m.dir !== 'none' ? m.dir : m.want;
+        const dest = d === 'none' ? null : this.corridorEnd(g, d as UnitDir);
+        if (!dest) break;
+        this.fx.burst(g.px, g.py, g.def.color, 18, { speed: 180, life: 0.4, size: 3 });
+        m.place(dest.x, dest.y, d);
+        m.want = d;
+        this.fx.flash(PALETTE.accent, 0.25, 0.2);
+        this.fx.burst(g.px, g.py, g.def.color, 26, { speed: 220, life: 0.5, size: 3 });
+        this.fx.ring(g.px, g.py, g.def.color, TILE * 1.8, 0.35, 2.5);
         break;
       }
       case 'phase':
         g.beginPhase();
         this.fx.burst(g.px, g.py, g.def.color, 18, { speed: 160, life: 0.5, size: 3 });
         break;
-      case 'decoy':
-        this.decoy = { x: g.mover.tx, y: g.mover.ty };
-        this.decoyTimer = 5;
-        this.fx.burst(centerOf(g.mover.tx), centerOf(g.mover.ty), PALETTE.fruit, 20, {
-          speed: 180,
-          life: 0.6,
-          size: 3,
-        });
+      case 'blind': {
+        const p = this.pac;
+        p.blind = BLIND_TIME;
+        this.audio.alert();
+        this.fx.ring(p.px, p.py, PALETTE.danger, TILE * 2.4, 0.4, 3);
         break;
+      }
     }
+  }
+
+  /**
+   * WARP: straight ahead to the far end of the corridor — the last tile before
+   * a wall, ignoring side openings on the way. It follows the side portal like
+   * any corridor, and lands one tile short of Pac-Man rather than on or past
+   * him, so it sets up a catch instead of making one.
+   */
+  private corridorEnd(g: Ghost, d: UnitDir): TilePos | null {
+    const m = g.mover;
+    const pac = [this.pac.mover.tile, this.pac.mover.nextTile];
+    let cur = m.tile;
+    let moved = false;
+    for (let i = 0; i < COLS + ROWS && m.canEnterFrom(cur.x, cur.y, d); i++) {
+      const next = { x: (cur.x + DIRS[d].x + COLS) % COLS, y: cur.y + DIRS[d].y };
+      if (pac.some((p) => p.x === next.x && p.y === next.y)) break;
+      cur = next;
+      moved = true;
+    }
+    return moved ? cur : null;
   }
 
   private toggleCRT(): void {
@@ -729,21 +749,10 @@ export class Game {
   }
 
   private computeFields(): SimFields {
-    const dangerous: TilePos[] = [];
-    const edible: TilePos[] = [];
-    for (const g of this.ghosts) {
-      if (g.state === 'normal' || g.state === 'leaving') dangerous.push({ x: g.mover.tx, y: g.mover.ty });
-      else if (g.state === 'frightened') edible.push({ x: g.mover.tx, y: g.mover.ty });
-    }
-    // The decoy is tracked separately so it can dominate Pac-Man's attention.
-    const decoy = this.decoy
-      ? this.maze.field([{ x: this.decoy.x, y: this.decoy.y }], false)
-      : null;
-
-    const avoid = this.maze.field(dangerous, false);
-    const hunt = edible.length ? this.maze.field(edible, false) : null;
+    const threat = threatField(this.maze, this.ghosts, this.level);
     const dot = this.maze.dotsLeft > 0 ? this.maze.field(this.dotTilesNow(), false) : null;
-    return { avoid, hunt, dot, decoy };
+    const power = this.maze.powerLeft > 0 ? this.maze.field(this.maze.powerTiles(), false) : null;
+    return { threat, dot, power };
   }
 
   private context(fields: SimFields): SimContext {
@@ -753,7 +762,6 @@ export class Game {
       pac: this.pac,
       ghosts: this.ghosts,
       fields,
-      decoy: this.decoy,
       stance: this.stance,
       pincer: this.pincerTimer > 0,
       playerId: this.playerId,
@@ -927,10 +935,6 @@ export class Game {
     // --- Timers ---
     if (this.pincerTimer > 0) this.pincerTimer -= dt;
     if (this.pincerCd > 0) this.pincerCd = Math.max(0, this.pincerCd - dt);
-    if (this.decoyTimer > 0) {
-      this.decoyTimer -= dt;
-      if (this.decoyTimer <= 0) this.decoy = null;
-    }
     if (this.msgTimer > 0) {
       this.msgTimer -= dt;
       if (this.msgTimer <= 0) {
@@ -941,10 +945,7 @@ export class Game {
 
     if (this.frightTimer > 0) {
       this.frightTimer = Math.max(0, this.frightTimer - dt);
-      if (this.frightTimer === 0) {
-        this.pac.powered = false;
-        this.ghostsEaten = 0;
-      }
+      if (this.frightTimer === 0) this.pac.powered = false;
     }
 
     // Hit-stop after a big moment.
@@ -952,6 +953,7 @@ export class Game {
       this.freezeTimer -= dt;
       this.fx.update(dt);
       this.render(dt);
+      if (this.freezeTimer <= 0 && this.gameOverPending) this.gameOver();
       return;
     }
 
@@ -960,7 +962,17 @@ export class Game {
     const ctx = this.context(this.computeFields());
     this.updateSim(dt, ctx);
     this.resolveDots();
+    if (this.gameOverPending) return;
     this.resolveCollisions(false);
+
+    // The ability just came back (cooldown over, or back from banishment).
+    const ready = pg.cooldown <= 0 && pg.state === 'normal';
+    if (ready && !this.abilityWasReady) {
+      this.audio.abilityReady();
+      this.hud.flashAbility();
+      this.fx.ring(pg.px, pg.py, pg.def.color, TILE * 1.3, 0.4, 2);
+    }
+    this.abilityWasReady = ready;
 
     // Siren pitch tracks how close Pac-Man is to clearing the board.
     this.sirenTimer -= dt;
@@ -1010,7 +1022,6 @@ export class Game {
     if (v === 2) {
       this.frightTimer = FRIGHT_TIME;
       this.pac.powered = true;
-      this.ghostsEaten = 0;
       for (const g of this.ghosts) g.frighten();
       this.audio.powerUp();
       this.fx.flash(PALETTE.power, 0.35, 0.3);
@@ -1029,23 +1040,26 @@ export class Game {
     if (this.maze.dotsLeft <= 0) this.pacEscaped();
   }
 
+  /** Pac-Man cleared the maze: that's the game, however many lives are left. */
   private pacEscaped(): void {
-    this.lives--;
     this.audio.banished();
-    if (this.lives <= 0) {
-      this.gameOver();
-      return;
+    this.fx.flash(PALETTE.danger, 0.45, 0.4);
+    this.flashMessage('PAC-MAN ESCAPED!', 'GAME OVER', PALETTE.danger, 1.6);
+    this.gameOverPending = true;
+    this.freezeTimer = 1.6;
+  }
+
+  /** Award points; every EXTRA_LIFE_EVERY crossed earns a life, up to MAX_LIVES. */
+  private addScore(pts: number): void {
+    this.score += pts;
+    while (this.score >= this.nextLifeAt) {
+      this.nextLifeAt += EXTRA_LIFE_EVERY;
+      if (this.lives >= MAX_LIVES) continue;
+      this.lives++;
+      this.audio.fruit();
+      this.fx.pop('1UP', this.playerGhost.px, this.playerGhost.py - 26, PALETTE.gold, 16);
     }
-    this.flashMessage('PAC-MAN ESCAPED!', `${this.lives} LIVES LEFT`, PALETTE.danger, 2);
-    this.level++;
-    this.pacLives = PAC_LIVES;
-    this.maze.resetDots();
-    this.dotsDirty = true;
-    this.dotTiles = null;
-    this.spawnRound();
-    this.phase = 'ready';
-    this.readyTimer = READY_TIME;
-    this.syncMusic();
+    this.saveHigh();
   }
 
   private resolveCollisions(demo: boolean): void {
@@ -1053,6 +1067,7 @@ export class Game {
     const reach = TILE * 0.55;
 
     for (const g of this.ghosts) {
+      if (this.gameOverPending) return;
       const d = Math.hypot(g.px - this.pac.px, g.py - this.pac.py);
 
       if (this.frightTimer > 0 && g.state === 'frightened') {
@@ -1080,8 +1095,7 @@ export class Game {
   private onPacCaught(): void {
     const combo = this.pincerTimer > 0 ? 2 : 1;
     const pts = 200 * this.level * combo;
-    this.score += pts;
-    this.saveHigh();
+    this.addScore(pts);
     this.audio.catchPac();
     this.fx.flash(PALETTE.gold, 0.55, 0.25);
     this.fx.shake(10, 0.5);
@@ -1113,27 +1127,28 @@ export class Game {
     g.mover.ghostPass = true;
     g.mover.phase = false;
     g.frightTimer = 0;
-    this.ghostsEaten++;
-    const pts = 200 * this.ghostsEaten;
-
-    // The attract-mode demo runs the real simulation but must never touch the
-    // player's score or the persisted high score.
-    if (!demo) {
-      this.score += pts;
-      this.saveHigh();
-    }
 
     this.audio.eatGhost();
     this.fx.shake(7, 0.4);
     this.fx.flash(PALETTE.power, 0.4, 0.22);
     this.fx.burst(g.px, g.py, g.def.color, 30, { speed: 240, life: 0.7, size: 4 });
     this.fx.ring(g.px, g.py, PALETTE.power, TILE * 2.6, 0.5, 3);
-    this.fx.pop(`+${pts}`, g.px, g.py - 18, PALETTE.power, 16);
     this.freezeTimer = demo ? 0 : 0.35;
 
+    // The attract-mode demo runs the real simulation but must never touch the
+    // player's score, lives or the persisted high score.
     if (g.isPlayer && !demo) {
       this.score = Math.max(0, this.score - 300);
-      this.flashMessage("YOU'RE BANISHED!", 'PAC-MAN GOT YOU', PALETTE.danger, 2);
+      this.lives--;
+      this.fx.pop('-1 LIFE', g.px, g.py - 18, PALETTE.danger, 16);
+      if (this.lives <= 0) {
+        this.flashMessage('EATEN!', 'NO LIVES LEFT', PALETTE.danger, 1.6);
+        this.gameOverPending = true;
+        this.freezeTimer = 1.6;
+      } else {
+        const left = `${this.lives} ${this.lives === 1 ? 'LIFE' : 'LIVES'} LEFT`;
+        this.flashMessage("YOU'RE BANISHED!", left, PALETTE.danger, 2);
+      }
     }
   }
 
@@ -1178,8 +1193,8 @@ export class Game {
     this.drawDoorGfx();
     this.drawTrails();
     this.drawPac();
+    this.drawAlert();
     for (const g of this.ghosts) this.drawGhostView(g);
-    this.drawDecoy();
     this.drawPlayerRing();
     this.drawIntent();
     this.drawOffscreenPac();
@@ -1254,22 +1269,58 @@ export class Game {
     const target = dirAngle(this.pac.mover.dir, this.pacAngle);
     this.pacAngle = angleLerp(this.pacAngle, target, 0.25);
     drawPacman(g, TILE * 0.46, this.pac.mouth, PALETTE.pac, this.pacAngle);
-    // Powered up: a visible "hunter" aura so the reversal reads instantly.
+    // Powered up: a visible "hunter" aura so the reversal reads instantly. On a
+    // close chase it runs hot: red, faster, and wider.
     if (this.pac.powered) {
-      const pulse = 0.6 + 0.4 * Math.sin(this.elapsed * 12);
-      g.circle(0, 0, TILE * 0.62).stroke({
-        width: 2.5,
-        color: PALETTE.power,
+      const fury = this.pac.furious;
+      const color = fury ? PALETTE.danger : PALETTE.power;
+      const pulse = 0.6 + 0.4 * Math.sin(this.elapsed * (fury ? 26 : 12));
+      const grow = fury ? 1.12 : 1;
+      g.circle(0, 0, TILE * 0.62 * grow).stroke({
+        width: fury ? 3.5 : 2.5,
+        color,
         alpha: 0.35 + 0.4 * pulse,
       });
-      g.circle(0, 0, TILE * 0.78).stroke({
-        width: 1.5,
-        color: PALETTE.power,
-        alpha: 0.15 + 0.2 * pulse,
+      g.circle(0, 0, TILE * 0.78 * grow).stroke({
+        width: fury ? 2.5 : 1.5,
+        color,
+        alpha: 0.15 + 0.25 * pulse,
       });
     }
     g.position.set(this.pac.px, this.pac.py);
     g.rotation = this.pacAngle;
+  }
+
+  /**
+   * Clyde's BLINDSIDE: a Metal Gear-style "!" over Pac-Man. It pops in with an
+   * overshoot, holds with a slight bob, and flickers out in the last moments.
+   */
+  private drawAlert(): void {
+    const g = this.alertView;
+    g.clear();
+    const left = this.pac.blind;
+    if (left <= 0 || !this.pac.alive) return;
+    const age = BLIND_TIME - left;
+    if (left < 0.4 && Math.floor(left * 16) % 2 === 0) return;
+
+    // Pop: 0 → 1.35 → 1 over the first 0.18s.
+    const k = Math.min(1, age / 0.18);
+    const scale = k < 0.6 ? (k / 0.6) * 1.35 : 1.35 - ((k - 0.6) / 0.4) * 0.35;
+    const s = TILE * 1.05 * scale;
+    const bob = Math.sin(age * 9) * 1.5;
+    g.position.set(this.pac.px, this.pac.py - TILE * 1.25 + bob);
+
+    // A tapered bar and a dot, leaning slightly like the comic-book original.
+    const bar = [-0.18, -0.6, 0.24, -0.6, 0.07, 0.12, -0.09, 0.12].map((v) => v * s);
+    for (const [w, color] of [
+      [7, PALETTE.bgDeep],
+      [3.5, PALETTE.white],
+    ] as const) {
+      g.poly(bar).stroke({ width: w, color, join: 'round' });
+      g.circle(-0.03 * s, 0.34 * s, 0.13 * s).stroke({ width: w, color });
+    }
+    g.poly(bar).fill(PALETTE.danger);
+    g.circle(-0.03 * s, 0.34 * s, 0.13 * s).fill(PALETTE.danger);
   }
 
   private drawGhostView(g: Ghost): void {
@@ -1304,7 +1355,7 @@ export class Game {
 
   /**
    * Motion trails. Every actor leaves a faint long-exposure smear; SHADOW DASH
-   * and a powered Pac-Man leave a bright one. Samples that jump (tunnel wrap,
+   * and a powered Pac-Man leave a bright one (red when he's furious). Samples that jump (tunnel wrap,
    * blink, respawn) break the trail instead of streaking across the board.
    */
   private drawTrails(): void {
@@ -1346,31 +1397,15 @@ export class Game {
     const pts = sample('pac', this.pac.px, this.pac.py);
     if (!this.pac.alive) return;
     const powered = this.pac.powered;
+    const color = this.pac.furious ? PALETTE.danger : powered ? PALETTE.power : PALETTE.pac;
     for (let i = 0; i < pts.length - 1; i++) {
       const k = (i + 1) / pts.length;
       const p = pts[i];
       g.circle(p.x, p.y, TILE * 0.4 * (0.55 + 0.45 * k)).fill({
-        color: powered ? PALETTE.power : PALETTE.pac,
+        color,
         alpha: (powered ? 0.16 : 0.05) * k,
       });
     }
-  }
-
-  private drawDecoy(): void {
-    this.decoyView.clear();
-    if (!this.decoy) return;
-    const x = centerOf(this.decoy.x);
-    const y = centerOf(this.decoy.y);
-    this.decoyView.position.set(x, y);
-    drawGhost(this.decoyView, TILE * 0.45, {
-      color: PALETTE.fruit,
-      dir: 'left',
-      wave: 3,
-    });
-    this.decoyView.alpha = 0.55 + 0.3 * Math.sin(this.elapsed * 8);
-    this.decoyView
-      .circle(0, 0, TILE * 0.72)
-      .stroke({ width: 1.5, color: PALETTE.fruit, alpha: 0.3 + 0.25 * Math.sin(this.elapsed * 8) });
   }
 
   private drawPlayerRing(): void {
@@ -1421,6 +1456,8 @@ export class Game {
   private hudState(): HudState {
     const pg = this.playerGhost;
     const banished = !!pg && (pg.state === 'eaten' || pg.state === 'house');
+    // A timed announcement (lives left, game over) outranks the banished banner.
+    const banner = banished && this.msgTimer <= 0 && !this.gameOverPending;
 
     return {
       score: this.score,
@@ -1446,13 +1483,13 @@ export class Game {
       message:
         this.phase === 'paused'
           ? 'PAUSED'
-          : banished
+          : banner
             ? 'BANISHED!'
             : this.message,
       submessage:
         this.phase === 'paused'
           ? 'PRESS P TO RESUME'
-          : banished
+          : banner
             ? pg && pg.state === 'eaten'
               ? 'DRIVE BACK TO THE HOUSE'
               : 'RESPAWNING…'
@@ -1460,7 +1497,7 @@ export class Game {
       messageColor:
         this.phase === 'paused'
           ? PALETTE.text
-          : banished
+          : banner
             ? PALETTE.danger
             : this.messageColor,
       muted: this.muted,

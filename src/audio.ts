@@ -139,6 +139,18 @@ export class GameAudio {
     this.tone(500, 0.22, { type: 'sawtooth', gain: 0.16, slideTo: 1400 });
   }
 
+  /** Your ability is charged again: a short, bright chime. */
+  abilityReady(): void {
+    this.tone(1318, 0.09, { type: 'triangle', gain: 0.15 });
+    this.tone(1976, 0.16, { type: 'triangle', gain: 0.13, when: 0.07 });
+  }
+
+  /** Clyde's BLINDSIDE: the sharp two-note "!" sting. */
+  alert(): void {
+    this.tone(988, 0.07, { type: 'square', gain: 0.17 });
+    this.tone(1480, 0.26, { type: 'square', gain: 0.16, when: 0.07, slideTo: 1400 });
+  }
+
   banished(): void {
     [660, 440, 330].forEach((f, i) =>
       this.tone(f, 0.16, { type: 'square', gain: 0.15, when: i * 0.08, slideTo: f * 0.6 }),

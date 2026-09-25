@@ -10,16 +10,24 @@
  * Each track gets its own lazily-created <audio> element so previously-played
  * tracks stay warm in the browser cache. Volume is ramped per frame for smooth
  * fade-ins/crossfades and for ducking while paused.
+ *
+ * The menu has a track of its own. In game, the level tracks form a playlist
+ * that nothing in the game interrupts: each one plays out and, near its end,
+ * fades into the next, cycling.
  */
 export interface MusicConfig {
   menu: string;
-  /** One track per 5 levels, cycled. */
+  /** The in-game playlist, played in order and cycled. */
   levels: string[];
   /** Display names, matching [menu, ...levels]. */
   names?: string[];
 }
 
-const LEVELS_PER_TRACK = 5;
+/** Seconds before an in-game track ends when it starts fading into the next. */
+const CROSSFADE_LEAD = 5;
+/** Default fade rates, in volume units per second. */
+const FADE_IN = 1.6;
+const FADE_OUT = 4;
 
 export class MusicPlayer {
   private readonly srcs: string[];
@@ -33,6 +41,11 @@ export class MusicPlayer {
   private muted = false;
   private ducked = false;
   private unlocked = false;
+  private fadeIn = FADE_IN;
+  private fadeOut = FADE_OUT;
+  /** Position in the in-game playlist (0-based, excluding the menu track). */
+  private gameIdx = 0;
+  private gamePlayed = false;
 
   constructor(config: MusicConfig) {
     this.srcs = [config.menu, ...config.levels];
@@ -88,6 +101,8 @@ export class MusicPlayer {
     if (idx < 0 || idx >= this.srcs.length) return;
     const el = this.element(idx);
     if (!el) return;
+    this.fadeIn = FADE_IN;
+    this.fadeOut = FADE_OUT;
     if (this.idx !== idx) {
       this.idx = idx;
       this.vols.set(idx, 0);
@@ -113,20 +128,41 @@ export class MusicPlayer {
     this.play(0);
   }
 
-  /** Manually advance to the next track (wraps). */
-  cycle(): void {
-    const n = this.srcs.length;
-    if (n === 0) return;
-    this.play((this.idx + 1 + n) % n);
+  private get gameCount(): number {
+    return this.srcs.length - 1;
   }
 
-  /** Levels 1-5 → track 1, 6-10 → track 2, … cycling. */
-  playForLevel(level: number): void {
-    const count = Math.max(1, this.srcs.length - 1);
-    const i = Math.floor((Math.max(1, level) - 1) / LEVELS_PER_TRACK) % count;
-    this.play(1 + i);
-    // Warm the next act's track in the background.
-    this.prefetch(1 + ((i + 1) % count));
+  private get inGame(): boolean {
+    return this.idx >= 1;
+  }
+
+  /**
+   * Start (or keep) the in-game playlist. Already on it — a new round or level
+   * — nothing changes. Coming from the menu, a game picks up the playlist at
+   * the song after the last one heard.
+   */
+  playGame(): void {
+    if (this.gameCount <= 0 || this.inGame) return;
+    if (this.gamePlayed) this.gameIdx = (this.gameIdx + 1) % this.gameCount;
+    this.gamePlayed = true;
+    this.play(1 + this.gameIdx);
+    this.prefetch(1 + ((this.gameIdx + 1) % this.gameCount));
+  }
+
+  /** Next in-game song. `gentle` is the end-of-track fade; otherwise a quick cut. */
+  private advance(gentle: boolean): void {
+    this.gameIdx = (this.gameIdx + 1) % this.gameCount;
+    this.play(1 + this.gameIdx);
+    this.prefetch(1 + ((this.gameIdx + 1) % this.gameCount));
+    if (gentle) {
+      this.fadeIn = this.base / 2.5;
+      this.fadeOut = this.base / (CROSSFADE_LEAD - 1);
+    }
+  }
+
+  /** Manually skip to the next in-game song. The menu keeps its own track. */
+  cycle(): void {
+    if (this.inGame && this.gameCount > 1) this.advance(false);
   }
 
   setMuted(muted: boolean): void {
@@ -145,12 +181,24 @@ export class MusicPlayer {
   }
 
   update(dt: number): void {
-    const rate = 1.6;
+    // Near the end of an in-game song, fade into the next one.
+    const cur = this.inGame ? this.els.get(this.idx) : undefined;
+    if (
+      cur &&
+      this.gameCount > 1 &&
+      !cur.paused &&
+      Number.isFinite(cur.duration) &&
+      cur.duration > CROSSFADE_LEAD * 3 &&
+      cur.currentTime >= cur.duration - CROSSFADE_LEAD
+    ) {
+      this.advance(true);
+    }
+
     for (const [i, el] of this.els) {
       const goal = i === this.idx ? this.target : 0;
       let v = this.vols.get(i) ?? 0;
-      if (v < goal) v = Math.min(goal, v + dt * rate);
-      else if (v > goal) v = Math.max(goal, v - dt * rate * 2.5);
+      if (v < goal) v = Math.min(goal, v + dt * this.fadeIn);
+      else if (v > goal) v = Math.max(goal, v - dt * this.fadeOut);
       this.vols.set(i, v);
       el.volume = Math.max(0, Math.min(1, v));
       if (i !== this.idx && v <= 0.001 && !el.paused) el.pause();

@@ -74,7 +74,7 @@ const CONTROLS: Array<[string, string]> = [
   ['SPACE', 'PINCER'],
   ['SHIFT', 'ABILITY'],
   ['P / ESC', 'PAUSE'],
-  ['M', 'CHANGE MUSIC'],
+  ['M', 'NEXT SONG'],
   ['C / F / N', 'CRT/FPS/MUTE'],
 ];
 
@@ -114,7 +114,7 @@ export class Menu {
   private readonly controlsTitle = mkText('CONTROLS', 11, PALETTE.accent2);
   private readonly howTitle = mkText('HOW TO WIN', 11, PALETTE.accent2);
   private readonly tipsText = mkText(
-    'CATCH HIM 3× TO CLEAR A LEVEL\nIF HE EATS EVERY DOT: -1 LIFE\nPOWER PELLETS TURN THE TABLES',
+    'CATCH HIM 3× TO CLEAR A LEVEL\nALL DOTS EATEN: GAME OVER\nPOWER PELLETS TURN THE TABLES',
     10,
     PALETTE.textDim,
   );

@@ -1,4 +1,5 @@
 import {
+  COLS,
   FRIGHT_TIME,
   GHOSTS,
   HOUSE_CENTER,
@@ -7,20 +8,21 @@ import {
   PAC_START,
   PALETTE,
   RESPAWN_BANISH,
+  ROWS,
   SCATTER,
   SPEED,
   STANCE_INFO,
   TILE,
-  TUNNEL_ROW,
+  TUNNEL_SLOW,
 } from './config';
-import { Maze, NavCache } from './maze';
+import { Maze, NavCache, isTunnel } from './maze';
 import { Mover } from './mover';
 import { DIRS, DIR_ORDER, OPPOSITE, addTile } from './types';
 import type { Dir, GhostState, GhostId, Stance, TilePos, UnitDir } from './types';
 import type { GhostDef } from './config';
 
 export const neighborOf = (tx: number, ty: number, d: UnitDir): TilePos => ({
-  x: tx + DIRS[d].x,
+  x: (tx + DIRS[d].x + COLS) % COLS,
   y: ty + DIRS[d].y,
 });
 
@@ -31,12 +33,10 @@ export const fieldAt = (maze: Maze, field: Int32Array, x: number, y: number): nu
 export interface SimFields {
   /** Distance to the nearest remaining pellet (null when the maze is cleared). */
   dot: Int32Array | null;
-  /** Distance to the nearest dangerous ghost. */
-  avoid: Int32Array;
-  /** Distance to the nearest edible (frightened) ghost. */
-  hunt: Int32Array | null;
-  /** Distance to Clyde's decoy — Pac-Man prioritises this above real ghosts. */
-  decoy: Int32Array | null;
+  /** Seconds until the quickest dangerous ghost could reach each tile (-1: never). */
+  threat: Float32Array;
+  /** Distance to the nearest remaining power pellet (null when none are left). */
+  power: Int32Array | null;
 }
 
 export interface SimContext {
@@ -45,7 +45,6 @@ export interface SimContext {
   pac: Pacman;
   ghosts: Ghost[];
   fields: SimFields;
-  decoy: { x: number; y: number } | null;
   stance: Stance;
   pincer: boolean;
   playerId: GhostId;
@@ -54,6 +53,72 @@ export interface SimContext {
 
 const dist = (ax: number, ay: number, bx: number, by: number): number =>
   Math.hypot(ax - bx, ay - by);
+
+const DASH_BOOST = 1.75;
+
+/** AI ghosts speed up a little each level. */
+const levelSpeedUp = (level: number): number => Math.min(1.35, 1 + (level - 1) * 0.045);
+
+/**
+ * Seconds until any dangerous ghost could reach each tile. Each ghost gets its
+ * own travel-time field at its current top speed (dash included), so Pac-Man
+ * reads a dashing Blinky as the threat it is; the tunnel slowdown is priced in,
+ * which is what makes the side portals a real escape route.
+ */
+export function threatField(maze: Maze, ghosts: Ghost[], level: number): Float32Array {
+  const out = new Float32Array(COLS * ROWS).fill(-1);
+  for (const g of ghosts) {
+    // A frightened ghost about to recover is already a threat, just a later one.
+    const recovering = g.state === 'frightened' && g.frightTimer < 1.2;
+    if (!g.isDangerous() && !recovering) continue;
+    const delay = recovering ? g.frightTimer : 0;
+    const speed = g.cruiseSpeed(level);
+    const m = g.mover;
+    // Mid-tile, the ghost could end up on either end of its step (the player
+    // can reverse at will), so seed both.
+    const seeds = [{ x: m.tx, y: m.ty, t: delay + m.t / speed }];
+    if (m.t > 0 && m.dir !== 'none') {
+      const n = m.nextTile;
+      seeds.push({ x: n.x, y: n.y, t: delay + (1 - m.t) / speed });
+    }
+    const f = maze.travelTime(seeds, speed, TUNNEL_SLOW, g.state === 'leaving');
+    for (let i = 0; i < out.length; i++) {
+      if (f[i] >= 0 && (out[i] < 0 || f[i] < out[i])) out[i] = f[i];
+    }
+  }
+  return out;
+}
+
+// Pac-Man AI tuning.
+/** A ghost this many seconds from Pac-Man's next tile puts him in escape mode. */
+const THREAT_HORIZON = 1.1;
+/** Pac-Man must beat a ghost to a tile by this much for it to count as safe. */
+const SAFE_MARGIN = 0.12;
+/** Escape-room tiles worth counting; beyond this a route is simply "open". */
+const ROOM_CAP = 40;
+/** Prey this close (in tiles) gets his full, locked-on attention. */
+const FURY_RANGE = 5;
+/** Minimum time between two reversals, so he commits instead of dithering. */
+const REVERSE_COOLDOWN = 0.45;
+
+/** One way Pac-Man could go from where he is now. */
+interface Route {
+  dir: UnitDir;
+  /** First tile on the route. */
+  tile: TilePos;
+  /** Tiles Pac-Man covers to reach it. */
+  lead: number;
+  /** The tile he'd be putting behind him (the escape search can't re-enter it). */
+  behind: TilePos;
+  reverse: boolean;
+}
+
+/** What lies down a route: how much of the maze he can still reach first. */
+interface Room {
+  tiles: number;
+  power: boolean;
+  tunnel: boolean;
+}
 
 // ---------------------------------------------------------------------------
 // Pac-Man — the AI hero. Clears pellets, flees ghosts, and hunts when powered.
@@ -66,6 +131,14 @@ export class Pacman {
   alive = true;
   deathT = 0;
   dir: Dir = 'left';
+  /** Clyde's BLINDSIDE: seconds left disoriented, picking turns at random. */
+  blind = 0;
+  /** While blind: the tile he last picked a turn for, and the turn. */
+  private blindAt = -1;
+  private blindDir: UnitDir = 'left';
+  /** The frightened ghost he has locked onto at close range, if any. */
+  private prey: Ghost | null = null;
+  private reverseCd = 0;
 
   constructor(maze: Maze) {
     this.mover = new Mover(maze);
@@ -78,6 +151,9 @@ export class Pacman {
     this.alive = true;
     this.deathT = 0;
     this.dir = PAC_START.dir;
+    this.blind = 0;
+    this.prey = null;
+    this.reverseCd = 0;
   }
 
   get px(): number {
@@ -92,81 +168,255 @@ export class Pacman {
     return this.mover.tile;
   }
 
-  private options(): UnitDir[] {
+  /** Closing in on a locked-on prey: faster, and it shows. */
+  get furious(): boolean {
+    return this.powered && this.prey !== null && this.blind <= 0;
+  }
+
+  private get speed(): number {
+    if (this.furious) return SPEED.pacFury;
+    return this.powered ? SPEED.pacPowered : SPEED.pac;
+  }
+
+  /**
+   * Every way he can go. Turns are judged at the tile where they can actually
+   * happen (the one he's heading into), and reversing is its own route — it's
+   * the only way out when a ghost appears ahead.
+   */
+  private routes(): Route[] {
     const m = this.mover;
+    const at = m.nextTile;
+    const moving = m.dir !== 'none';
+    const midTile = moving && m.t > 0;
+    const lead = midTile ? 1 - m.t : 0;
     const back = OPPOSITE[m.dir];
-    const out: UnitDir[] = [];
+    const out: Route[] = [];
+
     for (const d of DIR_ORDER) {
-      if (d === back) continue;
-      if (m.canEnter(d)) out.push(d);
+      if (d === back || !m.canEnterFrom(at.x, at.y, d)) continue;
+      out.push({ dir: d, tile: neighborOf(at.x, at.y, d), lead: lead + 1, behind: at, reverse: false });
     }
-    if (out.length === 0 && back !== 'none' && m.canEnter(back as UnitDir)) {
-      out.push(back as UnitDir);
+    if (back !== 'none') {
+      const b = back as UnitDir;
+      if (midTile) {
+        out.push({ dir: b, tile: m.tile, lead: m.t, behind: at, reverse: true });
+      } else if (m.canEnterFrom(at.x, at.y, b)) {
+        out.push({ dir: b, tile: neighborOf(at.x, at.y, b), lead: 1, behind: at, reverse: true });
+      }
     }
     return out;
   }
 
-  decide(ctx: SimContext): void {
-    const m = this.mover;
-    const opts = this.options();
-    if (opts.length === 0) return;
+  /** Can he reach tile index `i` (after `tiles` steps) before any ghost? */
+  private safeAt(threat: Float32Array, i: number, tiles: number): boolean {
+    const t = threat[i];
+    return t < 0 || tiles / this.speed + SAFE_MARGIN < t;
+  }
 
-    const { fields, maze } = ctx;
-    const edible = ctx.ghosts.some((g) => g.state === 'frightened');
+  /**
+   * Flood outward from a route's first tile through every tile Pac-Man reaches
+   * before any ghost can. A big room means a real escape; a small one is a
+   * trap closing. Power pellets and the tunnel in the room are noted.
+   */
+  private room(ctx: SimContext, r: Route): Room {
+    const { maze } = ctx;
+    const threat = ctx.fields.threat;
+    const out: Room = { tiles: 0, power: false, tunnel: false };
+    const start = maze.index(r.tile.x, r.tile.y);
+    if (!this.safeAt(threat, start, r.lead)) return out;
 
-    // --- Hunt mode ---------------------------------------------------------
-    // Powered up: chase the nearest frightened ghost and nothing else. This is
-    // the whole payoff of a power pellet, so it takes priority over pellets.
-    if (this.powered && edible && fields.hunt) {
-      let huntDir: UnitDir | null = null;
-      let huntDist = Infinity;
-      for (const d of opts) {
-        const n = neighborOf(m.tx, m.ty, d);
-        const hv = fieldAt(maze, fields.hunt, n.x, n.y);
-        if (hv >= 0 && hv < huntDist) {
-          huntDist = hv;
-          huntDir = d;
+    const seen = new Set<number>([maze.index(r.behind.x, r.behind.y), start]);
+    const queue: Array<[number, number]> = [[start, r.lead]];
+    for (let head = 0; head < queue.length && out.tiles < ROOM_CAP; head++) {
+      const [i, d] = queue[head];
+      out.tiles++;
+      const c = i % COLS;
+      const row = (i / COLS) | 0;
+      if (maze.dots[i] === 2) out.power = true;
+      if (isTunnel(c, row)) out.tunnel = true;
+      for (const dir of DIR_ORDER) {
+        const n = neighborOf(c, row, dir);
+        if (!maze.walkable(n.x, n.y)) continue;
+        const ni = maze.index(n.x, n.y);
+        if (seen.has(ni)) continue;
+        seen.add(ni);
+        if (this.safeAt(threat, ni, d + 1)) queue.push([ni, d + 1]);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Powered up: the tiles of the frightened ghosts worth chasing. Once one is
+   * within FURY_RANGE he locks onto it and won't be distracted until it's
+   * eaten or recovers. Otherwise, the ones he can catch before the power runs
+   * out, and your ghost when it's anywhere near as close as the rest — eating
+   * the player is what hurts.
+   */
+  private huntGoals(ctx: SimContext): Set<number> | null {
+    const { maze } = ctx;
+    const from = maze.field([this.mover.nextTile], false);
+    const distTo = (g: Ghost): number => fieldAt(maze, from, g.mover.tx, g.mover.ty);
+    // The tile nearest to where the ghost actually is. Aiming at where it's
+    // heading breaks head-on (that's the tile Pac-Man is leaving, so he'd turn
+    // away); aiming at where it came from lags a fleeing ghost.
+    const goal = (g: Ghost): Set<number> => {
+      const t = g.mover.t >= 0.5 ? g.mover.nextTile : g.mover.tile;
+      return new Set([maze.index(t.x, t.y)]);
+    };
+
+    const prey = this.prey;
+    if (prey && prey.state === 'frightened') {
+      const d = distTo(prey);
+      if (d >= 0 && d <= FURY_RANGE + 3) return goal(prey);
+    }
+    this.prey = null;
+
+    const catchable: Array<{ g: Ghost; d: number }> = [];
+    for (const g of ctx.ghosts) {
+      if (g.state !== 'frightened') continue;
+      const d = distTo(g);
+      // Frightened ghosts wander, so he closes at most of his speed.
+      if (d >= 0 && d / (SPEED.pacPowered * 0.7) < g.frightTimer) catchable.push({ g, d });
+    }
+    if (!catchable.length) return null;
+    const nearest = catchable.reduce((a, b) => (b.d < a.d ? b : a));
+    const player = catchable.find((c) => c.g.isPlayer);
+    const pick = player && player.d <= nearest.d + 6 ? [player] : catchable;
+    const closest = pick.reduce((a, b) => (b.d < a.d ? b : a));
+    if (closest.d <= FURY_RANGE) {
+      this.prey = closest.g;
+      return goal(closest.g);
+    }
+    const out = new Set<number>();
+    for (const c of pick) for (const i of goal(c.g)) out.add(i);
+    return out;
+  }
+
+  /**
+   * Tiles to the nearest goal along a route, never doubling back through the
+   * tile the route leaves behind. (A shared distance field would let a
+   * reversal "reach" prey through the very tile he's turning away from.)
+   */
+  private routeLength(ctx: SimContext, goals: Set<number>, r: Route): number {
+    const { maze } = ctx;
+    const start = maze.index(r.tile.x, r.tile.y);
+    if (goals.has(start)) return r.lead;
+    const seen = new Set<number>([maze.index(r.behind.x, r.behind.y), start]);
+    let frontier = [start];
+    for (let steps = 1; frontier.length && steps < 60; steps++) {
+      const next: number[] = [];
+      for (const i of frontier) {
+        const c = i % COLS;
+        const row = (i / COLS) | 0;
+        for (const dir of DIR_ORDER) {
+          const n = neighborOf(c, row, dir);
+          if (!maze.walkable(n.x, n.y)) continue;
+          const ni = maze.index(n.x, n.y);
+          if (seen.has(ni)) continue;
+          if (goals.has(ni)) return r.lead + steps;
+          seen.add(ni);
+          next.push(ni);
         }
       }
-      if (huntDir) {
-        m.want = huntDir;
+      frontier = next;
+    }
+    return Infinity;
+  }
+
+  decide(ctx: SimContext): void {
+    const m = this.mover;
+    const routes = this.routes();
+    if (routes.length === 0) return;
+    const { fields, maze } = ctx;
+    const at = m.nextTile;
+
+    // --- Blinded: he's lost track of everything. At each junction he takes a
+    // turn at random (never doubling back unless it's a dead end) and sticks
+    // with it until the next one.
+    if (this.blind > 0) {
+      const forward = routes.filter((r) => !r.reverse);
+      const pool = forward.length ? forward : routes;
+      const key = maze.index(at.x, at.y);
+      if (this.blindAt !== key || !pool.some((r) => r.dir === this.blindDir)) {
+        this.blindAt = key;
+        this.blindDir = pool[(Math.random() * pool.length) | 0].dir;
+      }
+      m.want = this.blindDir;
+      return;
+    }
+    this.blindAt = -1;
+
+    const pathTo = (field: Int32Array | null, r: Route, missing: number): number => {
+      if (!field) return 0;
+      const v = fieldAt(maze, field, r.tile.x, r.tile.y);
+      return v < 0 ? missing : r.lead + v;
+    };
+
+    const scored: Array<{ r: Route; score: number }> = [];
+    const threat = ctx.fields.threat;
+    const hunt = this.powered ? this.huntGoals(ctx) : null;
+    if (!hunt) this.prey = null;
+
+    if (hunt) {
+      // --- Hunt: chase the catchable ghost, turning round for it if needed,
+      // but never through a ghost that has recovered. Prey at the tile just
+      // ahead is within reach once he gets there: keep charging.
+      if (hunt.has(maze.index(at.x, at.y)) && m.dir !== 'none') {
+        m.want = m.dir;
         return;
       }
+      for (const r of routes) {
+        const safe = this.safeAt(threat, maze.index(r.tile.x, r.tile.y), r.lead);
+        const len = Math.min(99, this.routeLength(ctx, hunt, r));
+        scored.push({ r, score: -len * 4 - (safe ? 0 : 200) });
+      }
+    } else {
+      const near = threat[maze.index(at.x, at.y)];
+      const threatened = near >= 0 && near < THREAT_HORIZON;
+      const canPressOn = routes.some((r) => !r.reverse);
+
+      for (const r of routes) {
+        const i = maze.index(r.tile.x, r.tile.y);
+        const dotD = pathTo(fields.dot, r, 60);
+        const t = threat[i];
+        // How far ahead of the ghosts this tile keeps him, in his own tiles.
+        const gap = t < 0 ? 12 : Math.max(-6, Math.min(12, t * this.speed - r.lead));
+
+        if (!threatened) {
+          // Nobody close: clear pellets decisively; stay only mildly wary.
+          if (r.reverse && canPressOn) continue;
+          scored.push({ r, score: -dotD + Math.min(gap, 6) * 0.35 });
+          continue;
+        }
+
+        // --- Escape: prefer the route with the most maze he can still reach
+        // first. A power pellet in that room is a counter-attack; the tunnel
+        // slows the ghosts, not him.
+        const room = this.room(ctx, r);
+        let score = room.tiles * 3 + gap - dotD * 0.6;
+        if (room.power && !this.powered && fields.power) score += 30 - pathTo(fields.power, r, 30) * 1.5;
+        if (room.tunnel) score += 12;
+        scored.push({ r, score });
+      }
     }
 
-    // --- Normal: clear pellets while staying out of reach ------------------
-    const nearest = fields.avoid[maze.index(m.tx, m.ty)];
-    const threat = nearest >= 0 && nearest < 6;
-
-    let best = opts[0];
-    let bestScore = -Infinity;
-
-    for (const d of opts) {
-      const n = neighborOf(m.tx, m.ty, d);
-      const avoid = fields.avoid[maze.index(n.x, n.y)];
-      const avoidV = avoid < 0 ? 0 : Math.min(avoid, 14);
-      const dotRaw = fields.dot ? fieldAt(maze, fields.dot, n.x, n.y) : 0;
-      const dotV = dotRaw < 0 ? 60 : dotRaw;
-
-      let score = -dotV + avoidV * (threat ? 2.4 : 0.85);
-      // Grab a power pellet when boxed in — it's his escape hatch.
-      if (threat && maze.dots[maze.index(n.x, n.y)] === 2) score += 9;
-
-      // Clyde's decoy outranks every real ghost: Pac-Man reacts to it harder
-      // than anything else, so it can herd him wherever Clyde wants.
-      if (fields.decoy) {
-        const dv = fieldAt(maze, fields.decoy, n.x, n.y);
-        if (dv >= 0) score += Math.min(dv, 14) * 3.2;
-      }
-
-      score += Math.random() * 0.02;
-      if (score > bestScore) {
-        bestScore = score;
-        best = d;
-      }
+    let best: { r: Route; score: number } | null = null;
+    let bestForward: { r: Route; score: number } | null = null;
+    for (const s of scored) {
+      s.score += Math.random() * 0.02;
+      if (!best || s.score > best.score) best = s;
+      if (!s.r.reverse && (!bestForward || s.score > bestForward.score)) bestForward = s;
     }
+    if (!best) return;
 
-    m.want = best;
+    // Reversing mid-corridor has to clearly beat pressing on, and not too often.
+    if (best.r.reverse && bestForward) {
+      const margin = hunt ? 2 : 6;
+      if (this.reverseCd > 0 || best.score < bestForward.score + margin) best = bestForward;
+    }
+    if (best.r.reverse) this.reverseCd = REVERSE_COOLDOWN;
+    m.want = best.r.dir;
   }
 
   update(dt: number, ctx: SimContext): void {
@@ -174,13 +424,15 @@ export class Pacman {
       this.deathT += dt;
       return;
     }
+    if (this.reverseCd > 0) this.reverseCd = Math.max(0, this.reverseCd - dt);
+    if (this.blind > 0) this.blind = Math.max(0, this.blind - dt);
     this.decide(ctx);
-    this.mover.speed = this.powered ? SPEED.pacPowered : SPEED.pac;
+    this.mover.speed = this.speed;
     this.mover.update(dt);
     this.dir = this.mover.dir;
 
     const moving = this.mover.dir !== 'none';
-    this.mouthPhase += dt * (moving ? 14 : 4);
+    this.mouthPhase += dt * (moving ? (this.furious ? 24 : 14) : 4);
     const open = 0.5 - 0.5 * Math.cos(this.mouthPhase);
     this.mouth = 0.06 + open * 0.95;
   }
@@ -208,7 +460,6 @@ export class Ghost {
   // Ability / status.
   dashTimer = 0;
   cooldown = 0;
-  decoyTimer = 0;
   /** PHASE: true while the ghost may pass through walls. */
   phaseActive = false;
   private phaseInsideWall = false;
@@ -245,7 +496,7 @@ export class Ghost {
   }
 
   spawn(level: number): void {
-    const speedUp = Math.min(1.35, 1 + (level - 1) * 0.045);
+    const speedUp = levelSpeedUp(level);
     if (this.isPlayer) {
       this.mover.place(HOUSE_DOOR.x + 0, HOUSE_DOOR.y, 'left');
       this.state = 'normal';
@@ -266,7 +517,6 @@ export class Ghost {
     this.phaseInsideWall = false;
     this.phaseTimeout = 0;
     this.bob = 0;
-    this.decoyTimer = 0;
   }
 
   frighten(): void {
@@ -301,7 +551,6 @@ export class Ghost {
   private updateTimers(dt: number): void {
     if (this.cooldown > 0) this.cooldown = Math.max(0, this.cooldown - dt);
     if (this.dashTimer > 0) this.dashTimer = Math.max(0, this.dashTimer - dt);
-    if (this.decoyTimer > 0) this.decoyTimer = Math.max(0, this.decoyTimer - dt);
 
     if (this.phaseActive) {
       const inWall = this.mover.maze.isWall(this.mover.tx, this.mover.ty);
@@ -319,10 +568,16 @@ export class Ghost {
     }
   }
 
+  /** Open-corridor speed right now (dash included), for Pac-Man's threat model. */
+  cruiseSpeed(level: number): number {
+    if (this.state === 'leaving') return SPEED.ghost * 0.8;
+    const base = this.isPlayer ? SPEED.playerGhost : SPEED.ghost * levelSpeedUp(level);
+    return base * (this.dashTimer > 0 ? DASH_BOOST : 1);
+  }
+
   private speedFor(): number {
     const m = this.mover;
-    const inTunnel = m.ty === TUNNEL_ROW && (m.tx < 6 || m.tx > 21);
-    const tunnel = inTunnel ? 0.55 : 1;
+    const tunnel = isTunnel(m.tx, m.ty) ? TUNNEL_SLOW : 1;
     switch (this.state) {
       case 'house':
         return 0;
@@ -333,7 +588,7 @@ export class Ghost {
       case 'frightened':
         return SPEED.ghostFright * tunnel;
       default:
-        return (this.isPlayer ? SPEED.playerGhost : m.speed) * tunnel * (this.dashTimer > 0 ? 1.75 : 1);
+        return (this.isPlayer ? SPEED.playerGhost : m.speed) * tunnel * (this.dashTimer > 0 ? DASH_BOOST : 1);
     }
   }
 
@@ -492,9 +747,8 @@ export class Ghost {
 
     // Level-appropriate speed for AI ghosts.
     if (!this.isPlayer && this.state === 'normal') {
-      const speedUp = Math.min(1.35, 1 + (ctx.level - 1) * 0.045);
-      this.mover.speed = SPEED.ghost * speedUp;
-      if (this.dashTimer > 0) this.mover.speed *= 1.75;
+      this.mover.speed = SPEED.ghost * levelSpeedUp(ctx.level);
+      if (this.dashTimer > 0) this.mover.speed *= DASH_BOOST;
     }
   }
 }

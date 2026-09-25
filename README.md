@@ -40,7 +40,7 @@ Other scripts:
 | `Space` | **PINCER!** — the squad converges on Pac-Man |
 | `Shift` | Signature ability (depends on your ghost) |
 | `P` / `Esc` | Pause |
-| `M` | Change music track |
+| `M` | Skip to the next song (in game) |
 | `C` | Toggle the CRT effect |
 | `F` | Toggle the FPS readout |
 | `N` | Mute / unmute |
@@ -50,9 +50,15 @@ Other scripts:
 | Ghost | Ability |
 | --- | --- |
 | **Blinky** | *Shadow Dash* — burst of speed |
-| **Pinky** | *Blink* — warp two tiles ahead |
+| **Pinky** | *Warp* — jump straight to the end of the corridor ahead |
 | **Inky** | *Phase* — slip through walls |
-| **Clyde** | *Decoy* — a phantom that lures Pac-Man |
+| **Clyde** | *Blindside* — Pac-Man loses his bearings and wanders blindly for two and a half seconds |
+
+## Rules
+
+Catch Pac-Man three times to clear a level. You lose a life each time Pac-Man
+eats your ghost, and earn one back every 2,000 points (up to five). If Pac-Man
+clears the maze, it's game over on the spot.
 
 ## Deploying
 
