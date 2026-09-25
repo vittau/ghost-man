@@ -56,6 +56,8 @@ second copy in the app's `node_modules`.
 | `electron/main.js` | Desktop shell: window, `app://` file server, switches |
 | `electron/preload.cjs` | Sandboxed bridge behind `src/desktop.ts` |
 | `electron-builder.yml` | Desktop packaging, one section per OS |
+| `build/linux/ghost-man` | Linux launcher script: cleans Steam's environment, picks flags |
+| `docs/LINUX.md` | Steam Deck findings: what broke, why, how to debug it |
 | `docs/readme/generate.mjs` | Renders the README banner and section headers |
 
 ## Invariants — please don't break these
@@ -66,7 +68,8 @@ second copy in the app's `node_modules`.
    which are renders of `public/favicon.svg` for Safari, which ignores SVG
    favicons, and `build/icon.png`, a 1024px render of the same SVG that
    electron-builder turns into the app icons. Re-render them if the SVG
-   changes. `docs/` holds the README's screenshots and art; none of it ships.
+   changes. `docs/` holds the README's screenshots and art and notes such as
+   `LINUX.md`; none of it ships.
 2. **Movement uses the tile+progress model** (`Mover`): an actor sits between the
    centre of tile `(tx,ty)` and `(tx,ty)+dir` at progress `t ∈ [0,1]`, and the
    pixel position is a pure function of those. This is what makes turning exact
@@ -142,7 +145,6 @@ second copy in the app's `node_modules`.
   colours inline.
 - `npm run build` runs `tsc --noEmit` first and the project is strict
   (`noUnusedLocals`, `noUnusedParameters`), so unused imports fail the build.
-
 - **Controller labels follow the Steam Deck** (Xbox layout under Steam
   Input): A/B/X/Y, L1/R1, L2/R2, VIEW ⧉, MENU ☰.
 
@@ -164,6 +166,13 @@ resize freezes).
 For the desktop shell, `npm run desktop` and pass `--remote-debugging-port`
 to Electron to drive it the same way. There's no gamepad in CDP; override
 `navigator.getGamepads` from `Runtime.evaluate` with a scripted pad object.
+A viewport override is dropped when the CDP session closes, and the resize
+that follows re-runs `fit()`, so do all steps of a check in one session.
+
+Linux/Steam Deck problems mostly don't reproduce on a Mac. Read
+[`docs/LINUX.md`](docs/LINUX.md) before changing the desktop shell, the
+launcher or the GPU switches: it has the log layout, the Deck findings and a
+debugging playbook.
 
 ## Deploying
 
@@ -188,35 +197,41 @@ The Electron shell (`electron/main.js`) loads the same `dist/` bundle:
   `file://`: fetch, `<audio>` range requests and a stable localStorage origin
   (the high score) depend on it. The `grantFileProtocolExtraPrivileges` fuse
   is off accordingly.
-- On SteamOS it runs WebGL through ANGLE's Vulkan backend: the default
-  OpenGL backend drops part of the last full-screen pass there (a black
-  triangle, lower right). The window shows at once instead of on
-  `ready-to-show`. Chromium picks its display platform before `main.js`
-  runs, so platform switches (`--ozone-platform`) only work as real
-  command-line flags, i.e. from the launcher.
-- On Linux, `ghost-man` is a launcher script (`build/linux/ghost-man`) and
-  the Electron binary is `ghost-man-bin`. The script writes `launch.log`,
-  clears the `LD_PRELOAD` (Steam overlay) and `LD_LIBRARY_PATH` (Steam
-  runtime) that Steam hands to non-Steam games, and adds `--no-sandbox`
-  when Steam started it. In Gaming Mode (Steam-started, no Wayland) it also
-  adds `--disable-gpu-compositing`: GPU-composited frames go out through a
-  Vulkan swapchain that never reaches gamescope's screen (black display,
-  game running). `GHOST_MAN_FLAGS` appends test flags; Steam launch options
-  only pass reliably as `GHOST_MAN_FLAGS="…" %command%`. Keep the Steam Deck README steps pointing at
-  `ghost-man`, not the binary.
-- Every launch rewrites `ghost-man.log` (shell events, GPU status, renderer
-  console) and `chromium.log` in `userData` (`~/.config/Ghost-Man/` on
-  Linux; the folder follows `productName` in `package.json`). Keep logging failure-proof: it runs before anything else.
 - The renderer is sandboxed with context isolation; its only link to the
   shell is `window.ghostDesktop` from `preload.cjs` (CommonJS, as sandboxed
   preloads must be). Anything desktop-only checks `desktop` first.
+- The window shows at once, not on `ready-to-show`.
 - Electron is chosen over Tauri for Chromium's WebGL and media stack on
   Linux (Tauri would use WebKitGTK there). Chromium is most of the ~120 MB
   download; `electronLanguages` and per-arch DMGs trim what can be trimmed.
 
+Linux / Steam Deck (details and evidence in [`docs/LINUX.md`](docs/LINUX.md)):
+
+- `ghost-man` is a launcher script (`build/linux/ghost-man`, shipped via
+  `extraFiles`); the Electron binary is `ghost-man-bin`. Keep the README's
+  Steam Deck steps pointing at `ghost-man`. The script clears `LD_PRELOAD`
+  (Steam overlay) and `LD_LIBRARY_PATH` (Steam runtime), adds
+  `--no-sandbox` when Steam started it, and adds `--disable-gpu-compositing`
+  in Gaming Mode (Steam-started, no Wayland): GPU-composited frames go out
+  through a Vulkan swapchain that never reaches gamescope's screen.
+- `main.js` runs WebGL on ANGLE's Vulkan backend on SteamOS; the OpenGL
+  backend drops part of the last full-screen pass there (a black triangle).
+- Display-platform switches (`--ozone-platform`) are chosen before
+  `main.js` runs, so they only work on the real command line. GPU switches
+  (`--use-angle`, `--enable-features`) from `main.js` do work.
+- Test flags: `./ghost-man --flag` from a shell, or Steam launch options
+  `GHOST_MAN_FLAGS="--flag" %command%`. Arguments *after* `%command%` never
+  reached the launcher on the Deck.
+- Logs in `userData` (`~/.config/Ghost-Man/`, following `productName`):
+  `launch.log` (launcher + the binary's stderr) and `ghost-man.log` (shell
+  events, GPU status, renderer console) are rewritten every launch;
+  `chromium.log` appends. Keep logging failure-proof: it runs before
+  anything else.
+
 `npm version X.Y.Z && git push --follow-tags` releases:
-`.github/workflows/release.yml` builds one job per OS (a `Ghost-Man/` folder in a `.tar.xz` for the Deck,
-NSIS + portable for Windows, arm64 + x64 DMGs for macOS), stamps the tag's
-version with `-c.extraMetadata.version`, and publishes a GitHub release with
-`SHA256SUMS.txt`. The builds are unsigned (macOS ad-hoc), so the README
+`.github/workflows/release.yml` builds one job per OS (electron-builder's
+Linux `dir` target repacked as a `Ghost-Man/` folder in a `.tar.xz` for the
+Deck, NSIS + portable for Windows, arm64 + x64 DMGs for macOS), stamps the
+tag's version with `-c.extraMetadata.version`, and publishes a GitHub release
+with `SHA256SUMS.txt`. The builds are unsigned (macOS ad-hoc), so the README
 explains the Gatekeeper and SmartScreen prompts.
