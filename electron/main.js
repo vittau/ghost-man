@@ -2,6 +2,7 @@
 // from dist/ over a privileged custom scheme rather than file://, so fetch,
 // media streaming and localStorage behave exactly as they do on the web.
 import { app, BrowserWindow, ipcMain, Menu, net, protocol, shell } from 'electron';
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -9,6 +10,39 @@ const SCHEME = 'app';
 const ORIGIN = `${SCHEME}://ghost-man`;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, '..', 'dist');
+
+// A plain-text trail of the launch, for when the game won't show up (Steam
+// Deck: ~/.config/Ghost-Man/). Chromium's own log, which carries the GPU
+// process's errors, goes next to it.
+const LOG_DIR = app.getPath('userData');
+const LOG = path.join(LOG_DIR, 'ghost-man.log');
+function log(...parts) {
+  const line = `${new Date().toISOString()} ${parts.map((p) => (typeof p === 'string' ? p : JSON.stringify(p))).join(' ')}\n`;
+  try {
+    appendFileSync(LOG, line);
+  } catch {
+    /* logging must never take the game down */
+  }
+}
+try {
+  mkdirSync(LOG_DIR, { recursive: true });
+  writeFileSync(LOG, '');
+} catch {
+  /* read-only home: run without a log */
+}
+app.commandLine.appendSwitch('enable-logging', 'file');
+app.commandLine.appendSwitch('log-file', path.join(LOG_DIR, 'chromium.log'));
+log('start', {
+  version: app.getVersion(),
+  electron: process.versions.electron,
+  platform: process.platform,
+  argv: process.argv.slice(1),
+  env: Object.fromEntries(
+    ['XDG_SESSION_TYPE', 'DISPLAY', 'WAYLAND_DISPLAY', 'GAMESCOPE_WAYLAND_DISPLAY', 'SteamDeck', 'SteamGameId', 'LD_PRELOAD'].map(
+      (k) => [k, process.env[k] ?? null],
+    ),
+  ),
+});
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -28,8 +62,22 @@ if (process.platform === 'linux' && !app.commandLine.hasSwitch('ozone-platform')
   app.commandLine.appendSwitch('ozone-platform', 'x11');
 }
 
+// Linux GPU: take the most travelled path — ANGLE over OpenGL, no Vulkan.
+// Under gamescope, GPU start-up probing can hang before the first frame,
+// which leaves Steam's launch spinner turning and the game unkillable.
+if (process.platform === 'linux') {
+  if (!app.commandLine.hasSwitch('use-angle')) app.commandLine.appendSwitch('use-angle', 'gl');
+  if (!app.commandLine.hasSwitch('disable-features')) app.commandLine.appendSwitch('disable-features', 'Vulkan');
+}
+
 // One game at a time: a second launch focuses the running window.
-if (!app.requestSingleInstanceLock()) app.quit();
+if (!app.requestSingleInstanceLock()) {
+  log('another instance is running; quitting');
+  app.quit();
+}
+
+app.on('child-process-gone', (_event, details) => log('child process gone', details));
+app.on('gpu-info-update', () => log('gpu feature status', app.getGPUFeatureStatus()));
 
 function serveDist() {
   protocol.handle(SCHEME, (req) => {
@@ -51,7 +99,9 @@ function createWindow() {
     minWidth: 960,
     minHeight: 600,
     fullscreen: true,
-    show: false,
+    // Shown straight away rather than on 'ready-to-show': a window that
+    // waits for its first frame never appears if that frame never comes.
+    show: true,
     title: 'Ghost-Man',
     backgroundColor: '#0a0318',
     autoHideMenuBar: true,
@@ -65,7 +115,13 @@ function createWindow() {
     },
   });
 
-  win.once('ready-to-show', () => win.show());
+  const wc = win.webContents;
+  win.once('ready-to-show', () => log('ready to show'));
+  win.on('unresponsive', () => log('window unresponsive'));
+  wc.on('did-finish-load', () => log('page loaded'));
+  wc.on('did-fail-load', (_e, code, desc, url) => log('page failed', { code, desc, url }));
+  wc.on('render-process-gone', (_e, details) => log('renderer gone', details));
+  wc.on('console-message', (e) => log(`console.${e.level}`, e.message, `${e.sourceId}:${e.lineNumber}`));
 
   // F11 / Alt+Enter toggle fullscreen (F alone is the in-game FPS toggle).
   win.webContents.on('before-input-event', (event, input) => {
@@ -107,6 +163,12 @@ app.whenReady().then(() => {
   // macOS keeps the default menu for Cmd+Q / Cmd+Ctrl+F; elsewhere it would
   // only show up as a stray bar.
   if (process.platform !== 'darwin') Menu.setApplicationMenu(null);
+  log('ready', { gpu: app.getGPUFeatureStatus() });
   serveDist();
   createWindow();
+  log('window created');
+  app.getGPUInfo('basic').then(
+    (info) => log('gpu info', info),
+    (err) => log('gpu info failed', String(err)),
+  );
 });

@@ -75,6 +75,9 @@ async function boot(): Promise<void> {
   // screen drops frames unevenly and judders. Everything steps by real dt.
   app.ticker.maxFPS = 0;
 
+  // Milestone for the desktop shell's launch log.
+  console.info(`[ghost-man] renderer up: ${app.renderer.name} ${app.renderer.width}x${app.renderer.height}`);
+
   document.getElementById('loading')?.remove();
   const mount = document.getElementById('app') ?? document.body;
   mount.appendChild(app.canvas);

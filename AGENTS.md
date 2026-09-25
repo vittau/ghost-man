@@ -185,7 +185,13 @@ The Electron shell (`electron/main.js`) loads the same `dist/` bundle:
   (the high score) depend on it. The `grantFileProtocolExtraPrivileges` fuse
   is off accordingly.
 - On Linux it pins `--ozone-platform=x11`: Steam Deck's Gaming Mode
-  (gamescope) hosts games on XWayland.
+  (gamescope) hosts games on XWayland. It also pins ANGLE over OpenGL with
+  Vulkan off, and shows the window at once instead of on `ready-to-show`:
+  a GPU start-up that never produces a frame otherwise leaves Steam's
+  launch spinner turning.
+- Every launch rewrites `ghost-man.log` (shell events, GPU status, renderer
+  console) and `chromium.log` in `userData` (`~/.config/Ghost-Man/` on
+  Linux). Keep logging failure-proof: it runs before anything else.
 - The renderer is sandboxed with context isolation; its only link to the
   shell is `window.ghostDesktop` from `preload.cjs` (CommonJS, as sandboxed
   preloads must be). Anything desktop-only checks `desktop` first.
