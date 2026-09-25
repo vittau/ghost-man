@@ -52,7 +52,9 @@ export const SPEED = {
   pacPowered: 10.4,
   pacFury: 11.4, // powered and closing in on his prey
   ghost: 8.0,
-  ghostFright: 5.2,
+  // ~88% of normal. At 5.2, a powered Pac-Man closed 39+ tiles over
+  // FRIGHT_TIME, enough to reach a fleeing ghost from almost anywhere.
+  ghostFright: 7.0,
   ghostEaten: 15.0,
   playerGhost: 8.6,
 };
