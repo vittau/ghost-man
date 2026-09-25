@@ -249,8 +249,9 @@ override `navigator.getGamepads` over CDP (see AGENTS.md).
 
 ## Reference: the Deck in these sessions
 
-- Steam Deck (LCD or OLED not recorded). GPU vendor `0x1002` (AMD), device
-  `0x163f` (5695), which is Van Gogh.
+- Steam Deck **LCD**. GPU vendor `0x1002` (AMD), device `0x163f` (5695): the
+  Van Gogh ("Aerith") APU. The OLED model's APU ("Sephiroth") is a die
+  shrink of the same design and has not been tested.
 - Electron 44.4.5. Chromium reports `hardwareSupportsVulkan: false` in the
   early GPU info even when Vulkan works; ignore it.
 - Gaming Mode also sets `vk_xwayland_wait_ready` (Mesa prints `ATTENTION:
