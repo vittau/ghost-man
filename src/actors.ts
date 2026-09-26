@@ -782,7 +782,9 @@ export class Ghost {
       this.state = 'frightened';
       this.frightTimer = FRIGHT_TIME;
       this.flash = false;
-      if (this.mover.dir !== 'none') this.mover.reverse();
+      // The AI squad turns tail; the player's ghost keeps its heading, so
+      // escaping is the player's call.
+      if (!this.isPlayer && this.mover.dir !== 'none') this.mover.reverse();
     } else if (this.state === 'frightened') {
       this.frightTimer = FRIGHT_TIME;
     }
