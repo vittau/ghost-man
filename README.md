@@ -109,7 +109,7 @@ Pick your ghost on the title screen. The other three follow your orders.
 | **HUNT** | Classic chase |
 | **AMBUSH** | Cut him off ahead |
 | **FLANK** | Take his escape route |
-| **GUARD** | Camp the power pellets |
+| **GUARD** | Camp the power pellets, all but one; spare ghosts hunt |
 
 ## <img src="docs/readme/h-rules.svg" alt="Rules" width="100%">
 

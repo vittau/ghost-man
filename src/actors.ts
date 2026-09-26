@@ -52,6 +52,8 @@ export interface SimContext {
   level: number;
   /** The squad's stance targets, worked out once per frame (see squadPlan). */
   plan?: Map<GhostId, Spot>;
+  /** GUARD: the power pellet nobody guards (see Game.pickOpenPellet). */
+  openPellet?: TilePos | null;
   /** FLANK: Pac-Man's tiles, which flankers route around (see flankPlan). */
   pacBlock?: ReadonlySet<number>;
 }
@@ -234,7 +236,10 @@ function assignSpots(
   return left;
 }
 
-/** Targets for this frame's stance; ghosts left without a spot pursue him directly. */
+/**
+ * Targets for this frame's stance. Ghosts left without a spot pursue him
+ * directly, except under GUARD, where they're left out and hunt as in HUNT.
+ */
 function squadPlan(ctx: SimContext): Map<GhostId, Spot> {
   if (ctx.plan) return ctx.plan;
   const plan = new Map<GhostId, Spot>();
@@ -291,8 +296,11 @@ function squadPlan(ctx: SimContext): Map<GhostId, Spot> {
   } else if (stance === 'flank') {
     rest = flankPlan(ctx, squad, plan);
   } else if (stance === 'guard') {
-    // One ghost per remaining power pellet, nearest first.
-    rest = assignSpots(squad, maze.powerTiles(), reach, plan);
+    // One ghost per remaining power pellet bar the open one, nearest first.
+    const open = ctx.openPellet;
+    const guarded = maze.powerTiles().filter((p) => !open || p.x !== open.x || p.y !== open.y);
+    assignSpots(squad, guarded, reach, plan);
+    return plan;
   }
   for (const g of rest) plan.set(g.id, ctx.pac.mover.tile);
   return plan;
@@ -875,8 +883,9 @@ export class Ghost {
     const pacTile = { x: ctx.pac.mover.tx, y: ctx.pac.mover.ty };
     const pacDir: UnitDir = ctx.pac.mover.dir === 'none' ? 'left' : (ctx.pac.mover.dir as UnitDir);
 
-    if (ctx.stance === 'hunt') return ctx.maze.nearestOpen(this.personalityTarget(ctx, pacTile, pacDir));
-    return squadPlan(ctx).get(this.id) ?? pacTile;
+    const hunt = (): TilePos => ctx.maze.nearestOpen(this.personalityTarget(ctx, pacTile, pacDir));
+    if (ctx.stance === 'hunt') return hunt();
+    return squadPlan(ctx).get(this.id) ?? hunt();
   }
 
   private personalityTarget(ctx: SimContext, pacTile: TilePos, pacDir: UnitDir): TilePos {

@@ -606,6 +606,7 @@ export class Game {
     this.frightTimer = 0;
     this.pac.powered = false;
     this.abilityWasReady = true;
+    this.openPellet = null;
     this.nav.clear();
 
     // Snap the camera so a round never opens with a long pan.
@@ -781,6 +782,20 @@ export class Game {
   // -------------------------------------------------------------------------
 
   private dotTiles: TilePos[] | null = null;
+  private openPellet: TilePos | null = null;
+
+  /**
+   * GUARD never covers one power pellet, so Pac-Man always has one to go for.
+   * It's picked at random each round, and again once he's eaten it.
+   */
+  private pickOpenPellet(): TilePos | null {
+    const tiles = this.maze.powerTiles();
+    const p = this.openPellet;
+    if (!p || !tiles.some((t) => t.x === p.x && t.y === p.y)) {
+      this.openPellet = tiles.length ? tiles[(Math.random() * tiles.length) | 0] : null;
+    }
+    return this.openPellet;
+  }
 
   private dotTilesNow(): TilePos[] {
     if (!this.dotTiles) this.dotTiles = this.maze.allDotTiles();
@@ -802,6 +817,7 @@ export class Game {
       ghosts: this.ghosts,
       fields,
       stance: this.stance,
+      openPellet: this.pickOpenPellet(),
       playerId: this.playerId,
       level: this.level,
     };
