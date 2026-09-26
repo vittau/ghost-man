@@ -969,10 +969,10 @@ export class Game {
 
   private updatePlaying(dt: number, input: Input): void {
     // --- Controls ---
-    // Steering stays available while banished (state 'eaten') so the player can
-    // drive their eyes back to the house; only the in-house wait locks input.
+    // Banished eyes (state 'eaten') find their own way home, and the in-house
+    // wait locks input too.
     const pg = this.playerGhost;
-    if (pg.state !== 'house') pg.mover.want = input.wantDir;
+    if (pg.state !== 'house' && pg.state !== 'eaten') pg.mover.want = input.wantDir;
 
     if (input.justPressed('Digit1')) this.setStance('hunt');
     if (input.justPressed('Digit2')) this.setStance('ambush');
@@ -1528,7 +1528,7 @@ export class Game {
     const show = this.phase === 'playing' || this.phase === 'ready' || this.phase === 'menu' || this.phase === 'gameover';
     if (!show) return;
 
-    // Banished? Mark the house so it's obvious where to drive back to.
+    // Banished? Mark the house the eyes are heading back to.
     if (this.playerGhost.state === 'eaten') {
       const hx = centerOf(HOUSE_CENTER.x);
       const hy = centerOf(HOUSE_CENTER.y);
@@ -1592,7 +1592,7 @@ export class Game {
             : `PRESS ${this.device === 'gamepad' ? 'MENU' : 'P'} TO RESUME`
           : banner
             ? pg && pg.state === 'eaten'
-              ? 'DRIVE BACK TO THE HOUSE'
+              ? 'RETURNING TO THE HOUSE'
               : 'RESPAWNING…'
             : this.submessage,
       messageColor:

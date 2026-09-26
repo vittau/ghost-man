@@ -905,7 +905,8 @@ export class Ghost {
       this.mover.ghostPass = false;
     }
 
-    if (!this.isPlayer && !this.phaseActive) {
+    // The player's eyes drive themselves home once eaten.
+    if ((!this.isPlayer || this.state === 'eaten') && !this.phaseActive) {
       this.lastTarget = this.targetFor(ctx);
       this.chooseDir(ctx, this.lastTarget);
     }

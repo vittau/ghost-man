@@ -117,7 +117,7 @@ Pick your ghost on the title screen. The other three follow your orders.
 - If Pac-Man clears the maze, it's **game over** on the spot.
 - A power pellet turns the tables: Pac-Man hunts, and he goes for *you*
   first. Your ability is locked until you recover.
-- Get eaten and you lose a life, then drive your eyes back to the house.
+- Get eaten and you lose a life, and your eyes float back to the house.
   You earn a life back every 1,000 points (up to five).
 
 ## <img src="docs/readme/h-build.svg" alt="Build it" width="100%">
