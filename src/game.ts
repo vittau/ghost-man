@@ -1015,6 +1015,11 @@ export class Game {
     this.pac.powered = this.frightTimer > 0;
     const ctx = this.context(this.computeFields());
     this.updateSim(dt, ctx);
+    if (pg.phaseEjected) {
+      pg.phaseEjected = false;
+      this.fx.burst(pg.px, pg.py, pg.def.color, 22, { speed: 200, life: 0.5, size: 3 });
+      this.fx.ring(pg.px, pg.py, pg.def.color, TILE * 1.8, 0.35, 2.5);
+    }
     this.resolveDots();
     if (this.gameOverPending) return;
     this.resolveCollisions(false);
@@ -1444,7 +1449,7 @@ export class Game {
       wave,
     });
     view.position.set(g.px, g.py);
-    view.alpha = eaten ? 0.75 : g.mover.phase ? 0.7 : 1;
+    view.alpha = eaten ? 0.75 : g.mover.phase ? (g.phaseBlink ? 0.15 : 0.7) : 1;
   }
 
   /**

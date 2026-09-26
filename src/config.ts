@@ -80,6 +80,8 @@ export const READY_TIME = 2.0;
 export const ABILITY_COOLDOWN = 8.0;
 export const ABILITY_TIME = 1.4;
 export const BLIND_TIME = 2.5; // Clyde's BLINDSIDE
+export const PHASE_WALL_WARN = 3.0; // Inky's PHASE: seconds inside a wall before he blinks
+export const PHASE_WALL_MAX = 5.0; // ...and before he's pushed out onto the nearest track
 
 // Scatter / chase schedule (classic flavour).
 export const MODE_SCHEDULE: Array<{ mode: 'scatter' | 'chase'; time: number }> = [

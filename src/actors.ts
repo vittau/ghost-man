@@ -6,6 +6,8 @@ import {
   HOUSE_CENTER,
   HOUSE_DOOR,
   HOUSE_SLOTS,
+  PHASE_WALL_MAX,
+  PHASE_WALL_WARN,
   PAC_START,
   PALETTE,
   RESPAWN_BANISH,
@@ -636,6 +638,10 @@ export class Ghost {
   phaseActive = false;
   private phaseInsideWall = false;
   private phaseTimeout = 0;
+  /** PHASE: seconds spent inside walls on this traversal. */
+  private phaseWallTime = 0;
+  /** Set when PHASE ran out inside a wall and pushed him out (the game clears it). */
+  phaseEjected = false;
 
   constructor(maze: Maze, def: GhostDef) {
     this.def = def;
@@ -688,6 +694,8 @@ export class Ghost {
     this.phaseActive = false;
     this.phaseInsideWall = false;
     this.phaseTimeout = 0;
+    this.phaseWallTime = 0;
+    this.phaseEjected = false;
     this.bob = 0;
   }
 
@@ -712,13 +720,15 @@ export class Ghost {
 
   /**
    * PHASE: one traversal through a wall. It switches off the moment the ghost
-   * is back on a walkable tile, so it can never strand anyone inside geometry,
-   * and expires if it isn't used promptly.
+   * is back on a walkable tile, and expires if it isn't used promptly. Inside
+   * a wall it lasts PHASE_WALL_MAX seconds (blinking from PHASE_WALL_WARN),
+   * then pushes him out, so it can never strand anyone inside geometry.
    */
   beginPhase(): void {
     this.phaseActive = true;
     this.phaseInsideWall = false;
     this.phaseTimeout = 1.6;
+    this.phaseWallTime = 0;
     this.mover.phase = true;
     // Travel straight through rather than turning inside the wall.
     if (this.mover.dir !== 'none') this.mover.want = this.mover.dir;
@@ -732,6 +742,8 @@ export class Ghost {
       const inWall = this.mover.maze.isWall(this.mover.tx, this.mover.ty);
       if (inWall) {
         this.phaseInsideWall = true;
+        this.phaseWallTime += dt;
+        if (this.phaseWallTime >= PHASE_WALL_MAX) this.ejectFromWall();
       } else if (this.phaseInsideWall) {
         this.phaseActive = false; // back on the track
       } else {
@@ -742,6 +754,24 @@ export class Ghost {
     } else if (this.mover.phase) {
       this.mover.phase = false;
     }
+  }
+
+  /** PHASE about to run out inside a wall: he blinks, faster toward the end. */
+  get phaseBlink(): boolean {
+    if (!this.phaseActive || this.phaseWallTime < PHASE_WALL_WARN) return false;
+    const late = this.phaseWallTime >= PHASE_WALL_WARN + (PHASE_WALL_MAX - PHASE_WALL_WARN) / 2;
+    return Math.floor(this.phaseWallTime * (late ? 12 : 6)) % 2 === 0;
+  }
+
+  /** PHASE ran out inside a wall: out onto the nearest track, same heading. */
+  private ejectFromWall(): void {
+    const m = this.mover;
+    const d = m.dir === 'none' ? { x: 0, y: 0 } : DIRS[m.dir];
+    const dest = m.maze.nearestOpen({ x: Math.round(m.tx + d.x * m.t), y: Math.round(m.ty + d.y * m.t) });
+    m.place(dest.x, dest.y, m.dir);
+    this.phaseActive = false;
+    this.phaseInsideWall = false;
+    this.phaseEjected = true;
   }
 
   /** Open-corridor speed right now (dash included), for Pac-Man's threat model. */

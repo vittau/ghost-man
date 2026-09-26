@@ -111,7 +111,8 @@ second copy in the app's `node_modules`.
    in).
 10. **PHASE crosses one wall** and switches off the moment the ghost is back on
     a walkable tile (`Ghost.beginPhase`). It must never strand an actor inside
-    geometry.
+    geometry: after `PHASE_WALL_MAX` seconds inside walls (blinking from
+    `PHASE_WALL_WARN`) it pushes the ghost onto the nearest track.
 11. **No minimap.** Deliberate design decision: a board-wide tactical overlay
     lets a good player ignore the maze entirely, which defeats the game. Don't
     add one, or any equivalent whole-board readout.
