@@ -8,7 +8,7 @@ import {
   HOUSE_SLOTS,
   PHASE_WALL_MAX,
   PHASE_WALL_WARN,
-  PAC_START,
+  PAC_START_DIR,
   PALETTE,
   RESPAWN_BANISH,
   ROWS,
@@ -17,7 +17,7 @@ import {
   STANCE_INFO,
   TUNNEL_SLOW,
 } from './config';
-import { Maze, NavCache, isTunnel } from './maze';
+import { Maze, NavCache } from './maze';
 import { Mover } from './mover';
 import { DIRS, DIR_ORDER, OPPOSITE, addTile } from './types';
 import type { Dir, GhostState, GhostId, Stance, TilePos, UnitDir } from './types';
@@ -395,12 +395,13 @@ export class Pacman {
   }
 
   spawn(): void {
-    this.mover.place(PAC_START.x, PAC_START.y, PAC_START.dir);
+    const start = this.mover.maze.pacStart;
+    this.mover.place(start.x, start.y, PAC_START_DIR);
     this.mover.speed = SPEED.pac;
     this.powered = false;
     this.alive = true;
     this.deathT = 0;
-    this.dir = PAC_START.dir;
+    this.dir = PAC_START_DIR;
     this.blind = 0;
     this.prey = null;
     this.reverseCd = 0;
@@ -483,7 +484,7 @@ export class Pacman {
       const c = i % COLS;
       const row = (i / COLS) | 0;
       if (maze.dots[i] === 2) out.power = true;
-      if (isTunnel(c, row)) out.tunnel = true;
+      if (maze.isTunnel(c, row)) out.tunnel = true;
       for (const dir of DIR_ORDER) {
         const n = neighborOf(c, row, dir);
         if (!maze.walkable(n.x, n.y)) continue;
@@ -861,7 +862,7 @@ export class Ghost {
 
   private speedFor(level: number): number {
     const m = this.mover;
-    const tunnel = isTunnel(m.tx, m.ty) ? TUNNEL_SLOW : 1;
+    const tunnel = m.maze.isTunnel(m.tx, m.ty) ? TUNNEL_SLOW : 1;
     switch (this.state) {
       case 'house':
         return 0;

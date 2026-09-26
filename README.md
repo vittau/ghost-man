@@ -113,7 +113,8 @@ Pick your ghost on the title screen. The other three follow your orders.
 
 ## <img src="docs/readme/h-rules.svg" alt="Rules" width="100%">
 
-- Catch Pac-Man **three times** to clear a level.
+- Catch Pac-Man **three times** to clear a level. Each level brings a new
+  maze, and they start over after the last.
 - If Pac-Man clears the maze, it's **game over** on the spot.
 - A power pellet turns the tables: Pac-Man hunts, and he goes for *you*
   first. Your ability is locked until you recover.

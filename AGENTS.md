@@ -35,9 +35,11 @@ second copy in the app's `node_modules`.
 | --- | --- |
 | `src/main.ts` | Bootstrap: Pixi app, responsive sizing, game loop, audio unlock |
 | `src/game.ts` | State machine, rules, camera, rendering, orchestration |
-| `src/config.ts` | Dimensions, palette, maze layout, ghost roster, speeds |
+| `src/config.ts` | Dimensions, palette, ghost roster, speeds |
 | `src/types.ts` | Shared types and direction tables |
-| `src/maze.ts` | Tile grid, pellet layer, BFS distance fields (`NavCache`) |
+| `src/levels/*.maze` | The mazes, one plain-text grid per level (format in each file) |
+| `src/levels.ts` | Loads and validates the `.maze` files; `levelFor()` cycles them |
+| `src/maze.ts` | Tile grid, pellet layer, tunnels, BFS distance fields (`NavCache`) |
 | `src/mover.ts` | Grid-locked, drift-free movement |
 | `src/actors.ts` | Pac-Man + ghost simulation and AI |
 | `src/draw.ts` | Procedural vector art (Pac-Man, ghosts, silhouettes, sparkles, door) |
@@ -139,6 +141,12 @@ second copy in the app's `node_modules`.
 - Most art is redrawn every frame into `Graphics`. Cache anything that owns a
   GPU resource — `FillGradient`s are built once per colour (`bodyGradient()`
   in `draw.ts`), never per frame.
+- **Mazes are data.** A new level is a `.maze` file in `src/levels/`; levels
+  play them in file-name order, then start over. Every maze keeps the classic
+  ghost house and its ring of floor (rows 11-17, columns 9-18): the AI's house
+  slots, door and exit path are built around it, and `parseLevel` rejects a
+  file that changes it. `P` marks Pac-Man's start; a row open at both edges is
+  a tunnel, found by `Maze.findTunnels` (don't hard-code tunnel rows).
 - Speeds are expressed in **tiles per second** (`SPEED` in `config.ts`); multiply
   by `TILE` for pixels.
 - Colours come from `PALETTE` / `SKY` in `config.ts`. Keep the vaporwave

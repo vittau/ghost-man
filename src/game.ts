@@ -20,7 +20,6 @@ import {
   SCREEN_W,
   STANCE_ORDER,
   TILE,
-  TUNNEL_ROW,
   VIEW_W,
   WORLD_H,
   WORLD_W,
@@ -28,6 +27,7 @@ import {
 } from './config';
 import type { FieldTheme } from './config';
 import { lerpColor } from './color';
+import { levelFor } from './levels';
 import { Maze, NavCache, WALL } from './maze';
 import { centerOf } from './mover';
 import { Ghost, Pacman, threatField } from './actors';
@@ -337,10 +337,20 @@ export class Game {
     });
   }
 
-  /** Repaint the playfield in the theme for `level` (a new one each level). */
-  private applyTheme(level: number): void {
+  /**
+   * The maze and theme for `level` (both cycle through their lists), pellets
+   * reset; the playfield is repainted when either changes.
+   */
+  private setupLevel(level: number): void {
+    const def = levelFor(level);
     const theme = themeForLevel(level);
-    if (theme === this.theme) return;
+    const newMaze = def !== this.maze.level;
+    if (newMaze) this.maze.load(def);
+    else this.maze.resetDots();
+    this.dotsDirty = true;
+    this.dotTiles = null;
+    this.nav.clear();
+    if (!newMaze && theme === this.theme) return;
     this.theme = theme;
     this.buildMaze();
   }
@@ -508,7 +518,10 @@ export class Game {
   private drawPortals(): void {
     const g = this.portalGfx;
     g.clear();
-    const y = TUNNEL_ROW * TILE;
+    for (const row of this.maze.tunnelRows) this.drawPortal(g, row * TILE);
+  }
+
+  private drawPortal(g: Graphics, y: number): void {
     const depth = TILE * 1.6;
     for (const side of [-1, 1]) {
       const edge = side < 0 ? 0 : WORLD_W;
@@ -563,13 +576,11 @@ export class Game {
 
   private enterAttract(): void {
     this.phase = 'menu';
-    this.applyTheme(1);
+    this.setupLevel(1);
     this.demoCam = null;
     this.hud.layer.visible = false;
     this.menu.setVisible(true);
     for (const g of this.ghosts) g.isPlayer = false;
-    this.maze.resetDots();
-    this.dotsDirty = true;
     this.spawnRound();
     this.audio.stopMusic();
     this.message = '';
@@ -582,13 +593,11 @@ export class Game {
     this.audio.uiConfirm();
     this.score = 0;
     this.level = 1;
-    this.applyTheme(this.level);
+    this.setupLevel(this.level);
     this.lives = PLAYER_LIVES;
     this.nextLifeAt = EXTRA_LIFE_EVERY;
     this.gameOverPending = false;
     this.pacLives = PAC_LIVES;
-    this.maze.resetDots();
-    this.dotsDirty = true;
     for (const g of this.ghosts) g.isPlayer = false;
     this.playerGhost.isPlayer = true;
     this.hud.layer.visible = true;
@@ -617,10 +626,8 @@ export class Game {
 
   private newLevel(): void {
     this.level++;
-    this.applyTheme(this.level);
+    this.setupLevel(this.level);
     this.pacLives = PAC_LIVES;
-    this.maze.resetDots();
-    this.dotsDirty = true;
     this.spawnRound();
     this.phase = 'ready';
     this.readyTimer = READY_TIME;
@@ -629,7 +636,7 @@ export class Game {
 
   private gameOver(): void {
     this.demoCam = null;
-    this.applyTheme(1);
+    this.setupLevel(1);
     this.gameOverPending = false;
     this.freezeTimer = 0;
     this.phase = 'gameover';
@@ -638,8 +645,6 @@ export class Game {
     this.hud.layer.visible = false;
     this.menu.setVisible(true);
     for (const g of this.ghosts) g.isPlayer = false;
-    this.maze.resetDots();
-    this.dotsDirty = true;
     this.spawnRound();
     this.fx.clear();
     this.syncMusic();

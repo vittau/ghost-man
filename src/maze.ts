@@ -1,4 +1,6 @@
-import { COLS, MAZE_LAYOUT, PAC_START, ROWS, TUNNEL_ROW } from './config';
+import { COLS, ROWS } from './config';
+import { LEVELS } from './levels';
+import type { LevelDef } from './levels';
 import type { TilePos } from './types';
 
 export const WALL = 0;
@@ -6,9 +8,6 @@ export const FLOOR = 1;
 export const DOOR = 2;
 
 export const idx = (c: number, r: number): number => r * COLS + c;
-
-/** The side portal corridor, where ghosts slow down and Pac-Man doesn't. */
-export const isTunnel = (c: number, r: number): boolean => r === TUNNEL_ROW && (c < 6 || c > 21);
 
 const STEPS = [
   [0, -1],
@@ -20,31 +19,47 @@ const STEPS = [
 /**
  * Static maze geometry plus the mutable pellet layer.
  *
- * Tiles are stored in flat typed arrays. The layout contains decorative spaces
- * outside the playfield; `pruneUnreachable` floods from Pac-Man's start (with
- * tunnel wrapping and the ghost door open) and turns anything unreachable into
- * a wall, so the outside world simply disappears.
+ * Tiles are stored in flat typed arrays, refilled in place by `load` when a
+ * level brings a new maze. `pruneUnreachable` floods from Pac-Man's start
+ * (with tunnel wrapping and the ghost door open) and turns anything
+ * unreachable into a wall, so stray floor outside the playfield disappears.
  */
 export class Maze {
   readonly kind: Uint8Array;
-  private readonly baseDots: Uint8Array;
+  private baseDots: Uint8Array;
   dots: Uint8Array;
   dotsLeft = 0;
   dotsTotal = 0;
   powerLeft = 0;
   powerTotal = 0;
   /** Floor reachable without the ghost door: everywhere but the house. */
-  private readonly outside: Uint8Array;
+  private outside: Uint8Array;
+  /** Side-portal corridor tiles, where ghosts slow down and Pac-Man doesn't. */
+  private readonly tunnel: Uint8Array;
+  /** Rows with a wrap-around tunnel. */
+  tunnelRows: number[] = [];
+  level!: LevelDef;
+  pacStart: TilePos = { x: 0, y: 0 };
 
-  constructor() {
+  constructor(level: LevelDef = LEVELS[0]) {
     const n = COLS * ROWS;
     this.kind = new Uint8Array(n);
     this.dots = new Uint8Array(n);
+    this.baseDots = new Uint8Array(n);
+    this.outside = new Uint8Array(n);
+    this.tunnel = new Uint8Array(n);
+    this.load(level);
+  }
 
+  /** Swap in a level's maze, pellets reset. */
+  load(level: LevelDef): void {
+    this.level = level;
+    this.pacStart = level.pacStart;
+    this.dots.fill(0);
     for (let r = 0; r < ROWS; r++) {
-      const row = MAZE_LAYOUT[r] ?? '';
+      const row = level.rows[r];
       for (let c = 0; c < COLS; c++) {
-        const ch = row[c] ?? ' ';
+        const ch = row[c];
         const i = idx(c, r);
         if (ch === '#') this.kind[i] = WALL;
         else if (ch === '=') this.kind[i] = DOOR;
@@ -56,10 +71,33 @@ export class Maze {
     }
 
     this.pruneUnreachable();
-    const out = this.field([PAC_START], false);
+    const out = this.field([this.pacStart], false);
     this.outside = Uint8Array.from(out, (d) => (d >= 0 ? 1 : 0));
+    this.findTunnels();
     this.baseDots = this.dots.slice();
     this.recount();
+  }
+
+  /**
+   * A row open at both edges wraps round. Its tunnel runs in from each edge
+   * for as long as the corridor is walled above and below.
+   */
+  private findTunnels(): void {
+    this.tunnel.fill(0);
+    this.tunnelRows = [];
+    const enclosed = (c: number, r: number): boolean =>
+      this.kindAt(c, r) !== WALL && this.kindAt(c, r - 1) === WALL && this.kindAt(c, r + 1) === WALL;
+    for (let r = 0; r < ROWS; r++) {
+      if (this.kind[idx(0, r)] === WALL || this.kind[idx(COLS - 1, r)] === WALL) continue;
+      this.tunnelRows.push(r);
+      for (let c = 0; c < COLS && enclosed(c, r); c++) this.tunnel[idx(c, r)] = 1;
+      for (let c = COLS - 1; c >= 0 && enclosed(c, r); c--) this.tunnel[idx(c, r)] = 1;
+    }
+  }
+
+  isTunnel(c: number, r: number): boolean {
+    if (r < 0 || r >= ROWS) return false;
+    return this.tunnel[idx(this.wrapCol(c), r)] === 1;
   }
 
   private wrapCol(c: number): number {
@@ -72,7 +110,7 @@ export class Maze {
   private pruneUnreachable(): void {
     const seen = new Uint8Array(COLS * ROWS);
     const queue: number[] = [];
-    const start = idx(PAC_START.x, PAC_START.y);
+    const start = idx(this.pacStart.x, this.pacStart.y);
     seen[start] = 1;
     queue.push(start);
 
@@ -353,7 +391,7 @@ export class Maze {
         if (!passable(ni)) continue;
         // Keys are rounded to float32 like the field, or the stale-entry check
         // above would drop live entries.
-        const nt = Math.fround(k + (isTunnel(nc, nr) ? tunnelStep : step));
+        const nt = Math.fround(k + (this.isTunnel(nc, nr) ? tunnelStep : step));
         if (time[ni] >= 0 && time[ni] <= nt) continue;
         time[ni] = nt;
         push(nt, ni);

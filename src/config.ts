@@ -44,8 +44,6 @@ export function setViewportWidth(width: number): void {
 /** Minimap scale factor for the side panel. */
 export const MINIMAP_SCALE = 0.18;
 
-export const TUNNEL_ROW = 14;
-
 // Speeds are expressed in tiles per second (classic arcade feel).
 export const SPEED = {
   pac: 8.6,
@@ -243,51 +241,8 @@ export const STANCE_INFO: Record<Stance, { name: string; desc: string; key: stri
 
 export const FONT_FAMILY = '"Press Start 2P", ui-monospace, Menlo, monospace';
 
-// ---------------------------------------------------------------------------
-// The maze. 28 x 31.
-//   #  wall
-//   .  dot
-//   o  power pellet
-//   =  ghost-house door (ghosts only)
-//  (space) empty walkable floor
-// Cells outside the maze are spaces too; a reachability pass prunes them.
-// ---------------------------------------------------------------------------
-export const MAZE_LAYOUT: string[] = [
-  '############################',
-  '#............##............#',
-  '#.####.#####.##.#####.####.#',
-  '#o####.#####.##.#####.####o#',
-  '#.####.#####.##.#####.####.#',
-  '#..........................#',
-  '#.####.##.########.##.####.#',
-  '#.####.##.########.##.####.#',
-  '#......##....##....##......#',
-  '######.##### ## #####.######',
-  '     #.##### ## #####.#     ',
-  '     #.##          ##.#     ',
-  '     #.## ###==### ##.#     ',
-  '######.## #      # ##.######',
-  '      .   #      #   .      ',
-  '######.## #      # ##.######',
-  '     #.## ######## ##.#     ',
-  '     #.##          ##.#     ',
-  '     #.## ######## ##.#     ',
-  '######.## ######## ##.######',
-  '#............##............#',
-  '#.####.#####.##.#####.####.#',
-  '#.####.#####.##.#####.####.#',
-  '#o..##.......  .......##..o#',
-  '###.##.##.########.##.##.###',
-  '###.##.##.########.##.##.###',
-  '#......##....##....##......#',
-  '#.##########.##.##########.#',
-  '#.##########.##.##########.#',
-  '#..........................#',
-  '############################',
-];
-
-// Starting tiles.
-export const PAC_START = { x: 13, y: 23, dir: 'left' as Dir };
+// Starting tiles. Pac-Man's is each maze's P (see levels.ts); he sets off left.
+export const PAC_START_DIR: Dir = 'left';
 export const HOUSE_DOOR = { x: 13, y: 11 }; // tile just above the door
 export const HOUSE_CENTER = { x: 13, y: 14 };
 
