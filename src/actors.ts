@@ -1000,7 +1000,9 @@ export class Ghost {
       if (d < 1.2) {
         this.state = 'house';
         this.frightTimer = 0;
-        this.releaseTimer = -RESPAWN_BANISH;
+        // Out after RESPAWN_BANISH whoever it is: the slot's release delay only
+        // staggers the round start.
+        this.releaseTimer = this.slot.release - RESPAWN_BANISH;
         this.bobPhase = 0;
         this.mover.speed = SPEED.ghost;
         this.mover.ghostPass = false;
