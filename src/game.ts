@@ -1020,11 +1020,10 @@ export class Game {
       if (this.frightTimer === 0) this.pac.powered = false;
     }
 
-    // Hit-stop after a big moment.
+    // Hit-stop after a big moment: the simulation holds while the effects
+    // play on (update() renders the frame, effects included, once).
     if (this.freezeTimer > 0) {
       this.freezeTimer -= dt;
-      this.fx.update(dt);
-      this.render(dt);
       if (this.freezeTimer <= 0 && this.gameOverPending) this.gameOver();
       return;
     }
