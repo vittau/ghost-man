@@ -1218,7 +1218,7 @@ export class Game {
     // The attract-mode demo runs the real simulation but must never touch the
     // player's score, lives or the persisted high score.
     if (g.isPlayer && !demo) {
-      this.score = Math.max(0, this.score - 300);
+      this.score = Math.max(0, this.score - 100);
       this.lives--;
       this.fx.pop('-1 LIFE', g.px, g.py - 18, PALETTE.danger, 16);
       if (this.lives <= 0) {
