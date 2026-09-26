@@ -52,9 +52,10 @@ export const SPEED = {
   pacPowered: 10.4,
   pacFury: 11.4, // powered and closing in on his prey
   ghost: 8.0,
-  // ~88% of normal. At 5.2, a powered Pac-Man closed 39+ tiles over
-  // FRIGHT_TIME, enough to reach a fleeing ghost from almost anywhere.
-  ghostFright: 7.0,
+  // A powered Pac-Man closes ~18 tiles over FRIGHT_TIME, less than the
+  // maze's median path distance of 20. At 5.2 he closed 39+ (anywhere was
+  // in reach); at 7.0, ~25 still caught most players.
+  ghostFright: 8.0,
   ghostEaten: 15.0,
   playerGhost: 8.6,
 };
