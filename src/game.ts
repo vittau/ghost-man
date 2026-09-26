@@ -1551,10 +1551,10 @@ export class Game {
     const g = this.playerGhost;
     if (!g) return;
     const pulse = 0.5 + 0.5 * Math.sin(this.elapsed * 5);
-    this.playerRing.circle(g.px, g.py, TILE * 0.66).stroke({
-      width: 1.5,
+    this.playerRing.circle(g.px, g.py, TILE * 0.82).stroke({
+      width: 2.5,
       color: g.def.color,
-      alpha: 0.25 + 0.3 * pulse,
+      alpha: 0.4 + 0.35 * pulse,
     });
   }
 
