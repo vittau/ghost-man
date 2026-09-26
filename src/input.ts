@@ -33,7 +33,7 @@ const KEY_ACTIONS: Record<Action, readonly string[]> = {
   down: ['ArrowDown', 'KeyS'],
   confirm: ['Space', 'Enter', 'NumpadEnter'],
   back: [],
-  ability: ['ShiftLeft', 'ShiftRight'],
+  ability: ['Space'],
   pause: ['KeyP', 'Escape'],
   stanceNext: ['KeyE'],
   stancePrev: ['KeyQ'],

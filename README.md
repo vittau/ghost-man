@@ -83,7 +83,7 @@ The on-screen hints follow whichever device you touched last.
 | Move | Arrows / WASD | D-pad / left stick |
 | Start | Space / Enter | A |
 | Squad stance | `1`–`4`, `Q` / `E` to cycle | L1 / R1 |
-| Signature ability | Shift | A / R2 |
+| Signature ability | Space | A / R2 |
 | Pause | `P` / Esc | Menu ☰ |
 | Next song | `M` | Y |
 | Mute | `N` | View ⧉ |

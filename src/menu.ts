@@ -99,7 +99,7 @@ const CONTROLS: Record<InputDevice, Array<[string, string]>> = {
   keyboard: [
     ['ARROWS/WASD', 'MOVE'],
     ['1-4 / Q E', 'SQUAD STANCE'],
-    ['SHIFT', 'ABILITY'],
+    ['SPACE', 'ABILITY'],
     ['P / ESC', 'PAUSE'],
     ['M', 'NEXT SONG'],
     ['C / F / N', 'CRT/FPS/MUTE'],

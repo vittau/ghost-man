@@ -61,7 +61,7 @@ const PAUSE_ITEM_GAP = 30;
 
 /** Panel hints, worded for the device in use. */
 const HINTS: Record<InputDevice, { ability: string; line1: string; line2: string }> = {
-  keyboard: { ability: 'SHIFT', line1: '1-4 STANCE  P PAUSE', line2: 'M MUSIC  C CRT' },
+  keyboard: { ability: 'SPACE', line1: '1-4 STANCE  P PAUSE', line2: 'M MUSIC  C CRT' },
   gamepad: { ability: 'A', line1: 'L1/R1 STANCE  MENU PAUSE', line2: 'Y MUSIC  VIEW MUTE' },
 };
 
@@ -105,7 +105,7 @@ export class Hud {
   private readonly stanceNames: Text[] = [];
   private readonly stanceDescs: Text[] = [];
   private readonly barsKeyLabels: Text[] = [];
-  private readonly abilityLabel = mkText('ABILITY [SHIFT]', 10, PALETTE.textDim);
+  private readonly abilityLabel = mkText('ABILITY [SPACE]', 10, PALETTE.textDim);
   private readonly abilityValue = mkText('', 13, PALETTE.gold);
   private readonly yourGhostLabel = mkText('YOUR GHOST', 11, PALETTE.accent2);
   private readonly playerNameText = mkText('', 15, PALETTE.text);
