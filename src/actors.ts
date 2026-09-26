@@ -1013,8 +1013,9 @@ export class Ghost {
       this.mover.ghostPass = false;
     }
 
-    // The player's eyes drive themselves home once eaten.
-    if ((!this.isPlayer || this.state === 'eaten') && !this.phaseActive) {
+    // The player's ghost drives itself home once eaten, and back out.
+    const autopilot = this.state === 'eaten' || this.state === 'leaving';
+    if ((!this.isPlayer || autopilot) && !this.phaseActive) {
       this.lastTarget = this.targetFor(ctx);
       this.chooseDir(ctx, this.lastTarget);
     }

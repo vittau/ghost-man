@@ -6,7 +6,6 @@ import {
   BLIND_TIME,
   FRIGHT_TIME,
   GHOSTS,
-  HOUSE_CENTER,
   MAX_LIVES,
   MAZE_OFFSET_X,
   MAZE_ZOOM,
@@ -988,10 +987,10 @@ export class Game {
 
   private updatePlaying(dt: number, input: Input): void {
     // --- Controls ---
-    // Banished eyes (state 'eaten') find their own way home, and the in-house
-    // wait locks input too.
+    // Banished eyes (state 'eaten') find their own way home, wait in the house,
+    // then walk themselves out of the door ('leaving'); input resumes outside.
     const pg = this.playerGhost;
-    if (pg.state !== 'house' && pg.state !== 'eaten') pg.mover.want = input.wantDir;
+    if (pg.state === 'normal' || pg.state === 'frightened') pg.mover.want = input.wantDir;
 
     if (input.justPressed('Digit1')) this.setStance('hunt');
     if (input.justPressed('Digit2')) this.setStance('ambush');
@@ -1563,22 +1562,6 @@ export class Game {
     this.intentGfx.clear();
     const show = this.phase === 'playing' || this.phase === 'ready' || this.phase === 'menu' || this.phase === 'gameover';
     if (!show) return;
-
-    // Banished? Mark the house the eyes are heading back to.
-    if (this.playerGhost.state === 'eaten') {
-      const hx = centerOf(HOUSE_CENTER.x);
-      const hy = centerOf(HOUSE_CENTER.y);
-      const pulse = 0.5 + 0.5 * Math.sin(this.elapsed * 6);
-      this.intentGfx.circle(hx, hy, TILE * (0.8 + 0.25 * pulse)).stroke({
-        width: 2,
-        color: this.playerGhost.def.color,
-        alpha: 0.35 + 0.35 * pulse,
-      });
-      this.intentGfx.circle(hx, hy, TILE * 0.45).fill({
-        color: this.playerGhost.def.color,
-        alpha: 0.18,
-      });
-    }
 
     for (const g of this.ghosts) {
       if (g.isPlayer) continue;
