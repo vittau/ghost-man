@@ -78,11 +78,10 @@ export const MAX_LIVES = 3; // clearing a level adds a life, up to this many
 export const RESPAWN_BANISH = 4.5; // seconds a caught ghost sits in the house
 export const READY_TIME = 2.0;
 
-export const ABILITY_COOLDOWN = 8.0;
 export const ABILITY_TIME = 1.4;
 export const BLIND_TIME = 2.5; // Clyde's BLINDSIDE
-export const PHASE_WALL_WARN = 3.0; // Inky's PHASE: seconds inside a wall before he blinks
-export const PHASE_WALL_MAX = 5.0; // ...and before he's pushed out onto the nearest track
+export const PHASE_TIME = 5.0; // Inky's PHASE: seconds it lasts; still in a wall then, he's pushed out
+export const PHASE_WARN = 3.0; // ...and when he starts blinking
 
 // Scatter / chase schedule (classic flavour).
 export const MODE_SCHEDULE: Array<{ mode: 'scatter' | 'chase'; time: number }> = [
@@ -195,7 +194,7 @@ export const GHOSTS: GhostDef[] = [
     ability: 'dash',
     abilityName: 'SHADOW DASH',
     abilityDesc: 'Burst of raw speed',
-    cooldown: 10,
+    cooldown: 8,
     blurb: 'The shadow. Always on your tail.',
   },
   {
@@ -206,7 +205,7 @@ export const GHOSTS: GhostDef[] = [
     ability: 'warp',
     abilityName: 'WARP',
     abilityDesc: 'Jump to the corridor end',
-    cooldown: 10,
+    cooldown: 8,
     blurb: 'The ambusher. Cuts you off.',
   },
   {
@@ -217,7 +216,7 @@ export const GHOSTS: GhostDef[] = [
     ability: 'phase',
     abilityName: 'PHASE',
     abilityDesc: 'Through one wall',
-    cooldown: 10,
+    cooldown: 8,
     blurb: 'The wildcard. Ignores the maze.',
   },
   {

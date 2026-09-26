@@ -6,8 +6,8 @@ import {
   HOUSE_CENTER,
   HOUSE_DOOR,
   HOUSE_SLOTS,
-  PHASE_WALL_MAX,
-  PHASE_WALL_WARN,
+  PHASE_TIME,
+  PHASE_WARN,
   PAC_START_DIR,
   PALETTE,
   RESPAWN_BANISH,
@@ -713,9 +713,8 @@ export class Ghost {
   /** PHASE: true while the ghost may pass through walls. */
   phaseActive = false;
   private phaseInsideWall = false;
-  private phaseTimeout = 0;
-  /** PHASE: seconds spent inside walls on this traversal. */
-  private phaseWallTime = 0;
+  /** PHASE: seconds since it was switched on. */
+  private phaseTime = 0;
   /** Set when PHASE ran out inside a wall and pushed him out (the game clears it). */
   phaseEjected = false;
 
@@ -769,8 +768,7 @@ export class Ghost {
     this.cooldown = 0;
     this.phaseActive = false;
     this.phaseInsideWall = false;
-    this.phaseTimeout = 0;
-    this.phaseWallTime = 0;
+    this.phaseTime = 0;
     this.phaseEjected = false;
     this.bob = 0;
   }
@@ -795,16 +793,15 @@ export class Ghost {
   }
 
   /**
-   * PHASE: one traversal through a wall. It switches off the moment the ghost
-   * is back on a walkable tile, and expires if it isn't used promptly. Inside
-   * a wall it lasts PHASE_WALL_MAX seconds (blinking from PHASE_WALL_WARN),
-   * then pushes him out, so it can never strand anyone inside geometry.
+   * PHASE: one traversal through a wall, within PHASE_TIME seconds. It
+   * switches off the moment the ghost is back on a walkable tile. If time runs
+   * out (he blinks from PHASE_WARN) while he's inside a wall, it pushes him
+   * out, so it can never strand anyone inside geometry.
    */
   beginPhase(): void {
     this.phaseActive = true;
     this.phaseInsideWall = false;
-    this.phaseTimeout = 1.6;
-    this.phaseWallTime = 0;
+    this.phaseTime = 0;
     this.mover.phase = true;
     // Travel straight through rather than turning inside the wall.
     if (this.mover.dir !== 'none') this.mover.want = this.mover.dir;
@@ -815,16 +812,13 @@ export class Ghost {
     if (this.dashTimer > 0) this.dashTimer = Math.max(0, this.dashTimer - dt);
 
     if (this.phaseActive) {
+      this.phaseTime += dt;
       const inWall = this.mover.maze.isWall(this.mover.tx, this.mover.ty);
-      if (inWall) {
-        this.phaseInsideWall = true;
-        this.phaseWallTime += dt;
-        if (this.phaseWallTime >= PHASE_WALL_MAX) this.ejectFromWall();
-      } else if (this.phaseInsideWall) {
-        this.phaseActive = false; // back on the track
-      } else {
-        this.phaseTimeout -= dt;
-        if (this.phaseTimeout <= 0) this.phaseActive = false;
+      if (inWall) this.phaseInsideWall = true;
+      else if (this.phaseInsideWall) this.phaseActive = false; // back on the track
+      if (this.phaseActive && this.phaseTime >= PHASE_TIME) {
+        if (inWall) this.ejectFromWall();
+        else this.phaseActive = false;
       }
       this.mover.phase = this.phaseActive;
     } else if (this.mover.phase) {
@@ -832,11 +826,11 @@ export class Ghost {
     }
   }
 
-  /** PHASE about to run out inside a wall: he blinks, faster toward the end. */
+  /** PHASE about to run out: he blinks, faster toward the end. */
   get phaseBlink(): boolean {
-    if (!this.phaseActive || this.phaseWallTime < PHASE_WALL_WARN) return false;
-    const late = this.phaseWallTime >= PHASE_WALL_WARN + (PHASE_WALL_MAX - PHASE_WALL_WARN) / 2;
-    return Math.floor(this.phaseWallTime * (late ? 12 : 6)) % 2 === 0;
+    if (!this.phaseActive || this.phaseTime < PHASE_WARN) return false;
+    const late = this.phaseTime >= PHASE_WARN + (PHASE_TIME - PHASE_WARN) / 2;
+    return Math.floor(this.phaseTime * (late ? 12 : 6)) % 2 === 0;
   }
 
   /** PHASE ran out inside a wall: out onto the nearest track, same heading. */
