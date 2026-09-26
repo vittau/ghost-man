@@ -69,7 +69,9 @@ export class Mover {
     if (nc < 0) nc = COLS - 1;
     else if (nc >= COLS) nc = 0;
     const k = this.maze.kindAt(nc, nr);
-    if (k === WALL) return this.phase;
+    // PHASE passes inner walls only: the outer border stays solid, so it can't
+    // wrap round the outside of the board.
+    if (k === WALL) return this.phase && nr > 0 && nr < ROWS - 1 && nc > 0 && nc < COLS - 1;
     if (k === DOOR) return this.ghostPass;
     return true;
   }
