@@ -70,8 +70,7 @@ export const FRIGHT_FLASH = 2.2;
 
 export const PAC_LIVES = 3; // times you must catch Pac-Man to clear a level
 export const PLAYER_LIVES = 3; // lost each time Pac-Man eats your ghost
-export const MAX_LIVES = 5;
-export const EXTRA_LIFE_EVERY = 1000; // points per bonus life
+export const MAX_LIVES = 3; // clearing a level adds a life, up to this many
 export const RESPAWN_BANISH = 4.5; // seconds a caught ghost sits in the house
 export const READY_TIME = 2.0;
 

@@ -119,7 +119,7 @@ Pick your ghost on the title screen. The other three follow your orders.
 - A power pellet turns the tables: Pac-Man hunts, and he goes for *you*
   first. Your ability is locked until you recover.
 - Get eaten and you lose a life, and your eyes float back to the house.
-  You earn a life back every 1,000 points (up to five).
+  You earn a life back for each level you clear, up to three.
 
 ## <img src="docs/readme/h-build.svg" alt="Build it" width="100%">
 

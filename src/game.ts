@@ -4,7 +4,6 @@ import {
   CAM_MAX,
   COLS,
   BLIND_TIME,
-  EXTRA_LIFE_EVERY,
   FRIGHT_TIME,
   GHOSTS,
   HOUSE_CENTER,
@@ -123,7 +122,6 @@ export class Game {
   private high = 0;
   private level = 1;
   private lives = PLAYER_LIVES;
-  private nextLifeAt = EXTRA_LIFE_EVERY;
   private pacLives = PAC_LIVES;
   /** Was the player's ability usable last frame? (For the "ready" cue.) */
   private abilityWasReady = true;
@@ -595,7 +593,6 @@ export class Game {
     this.level = 1;
     this.setupLevel(this.level);
     this.lives = PLAYER_LIVES;
-    this.nextLifeAt = EXTRA_LIFE_EVERY;
     this.gameOverPending = false;
     this.pacLives = PAC_LIVES;
     for (const g of this.ghosts) g.isPlayer = false;
@@ -1129,16 +1126,8 @@ export class Game {
     this.freezeTimer = 1.6;
   }
 
-  /** Award points; every EXTRA_LIFE_EVERY crossed earns a life, up to MAX_LIVES. */
   private addScore(pts: number): void {
     this.score += pts;
-    while (this.score >= this.nextLifeAt) {
-      this.nextLifeAt += EXTRA_LIFE_EVERY;
-      if (this.lives >= MAX_LIVES) continue;
-      this.lives++;
-      this.audio.fruit();
-      this.fx.pop('1UP', this.playerGhost.px, this.playerGhost.py - 26, PALETTE.gold, 16);
-    }
     this.saveHigh();
   }
 
@@ -1193,6 +1182,11 @@ export class Game {
       this.phase = 'levelclear';
       this.levelClearTimer = 2.6;
       this.audio.levelClear();
+      if (this.lives < MAX_LIVES) {
+        this.lives++;
+        const g = this.playerGhost;
+        this.fx.pop('1UP', g.px, g.py - 26, PALETTE.gold, 16);
+      }
     } else {
       this.message = 'CAUGHT!';
       this.messageColor = PALETTE.gold;
