@@ -205,9 +205,10 @@ export class Maze {
 
   /**
    * Multi-source BFS distance field (in tiles) over the maze.
-   * Sources that land inside a wall are snapped to adjacent floor.
+   * Sources that land inside a wall are snapped to adjacent floor. Tiles in
+   * `blocked` (by index) are treated as walls, sources included.
    */
-  field(targets: TilePos[], ghostPass = false): Int32Array {
+  field(targets: TilePos[], ghostPass = false, blocked?: ReadonlySet<number>): Int32Array {
     const n = COLS * ROWS;
     const dist = new Int32Array(n).fill(-1);
     const queue = new Int32Array(n);
@@ -215,6 +216,7 @@ export class Maze {
     let tail = 0;
 
     const passable = (i: number): boolean => {
+      if (blocked?.has(i)) return false;
       const k = this.kind[i];
       if (k === WALL) return false;
       if (k === DOOR) return ghostPass;
@@ -376,6 +378,17 @@ export class NavCache {
     let f = this.cache.get(key);
     if (!f) {
       f = this.maze.field([target], ghostPass);
+      this.cache.set(key, f);
+    }
+    return f;
+  }
+
+  /** Like `to`, but with the `blocked` tiles walled off (cleared each frame). */
+  around(target: TilePos, blocked: ReadonlySet<number>): Int32Array {
+    const key = `${target.x},${target.y},around`;
+    let f = this.cache.get(key);
+    if (!f) {
+      f = this.maze.field([target], false, blocked);
       this.cache.set(key, f);
     }
     return f;

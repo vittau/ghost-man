@@ -51,7 +51,14 @@ export interface SimContext {
   playerId: GhostId;
   level: number;
   /** The squad's stance targets, worked out once per frame (see squadPlan). */
-  plan?: Map<GhostId, TilePos>;
+  plan?: Map<GhostId, Spot>;
+  /** FLANK: Pac-Man's tiles, which flankers route around (see flankPlan). */
+  pacBlock?: ReadonlySet<number>;
+}
+
+/** A squad target. `around`: get there without passing through Pac-Man. */
+export interface Spot extends TilePos {
+  around?: boolean;
 }
 
 const dist = (ax: number, ay: number, bx: number, by: number): number =>
@@ -109,36 +116,97 @@ function predictRoute(ctx: SimContext): TilePos[] {
   return route;
 }
 
+/** One way out of where Pac-Man is. */
+interface Branch {
+  /** The tile next to him on this side. */
+  start: TilePos;
+  /** Tiles from each tile to him along this branch (-1: not via this one). */
+  field: Int32Array;
+}
+
 /**
- * The ways out of where Pac-Man is: from his tile, follow each open direction
- * to the first junction. In a corridor that's both ends; at a junction, the
- * next junction down every branch.
+ * The sides Pac-Man can be reached from: every open direction out of his
+ * tile (and the one he's stepping into). `field` says which side of him a
+ * tile is on: the branch it reaches him through soonest.
  */
-function escapePoints(ctx: SimContext): TilePos[] {
+function pacBranches(ctx: SimContext, block: ReadonlySet<number>): Branch[] {
   const { maze } = ctx;
   const m = ctx.pac.mover;
-  const exits = (x: number, y: number): UnitDir[] => DIR_ORDER.filter((d) => m.canEnterFrom(x, y, d));
-  const start = m.tile;
-  const out: TilePos[] = [];
-  const seen = new Set<number>();
-  for (const d0 of exits(start.x, start.y)) {
-    let cur = neighborOf(start.x, start.y, d0);
-    let dir = d0;
-    for (let i = 0; i < 20; i++) {
-      const open = exits(cur.x, cur.y);
-      if (open.length >= 3) break;
-      const onward = open.find((d) => d !== OPPOSITE[dir]);
-      if (!onward) break;
-      dir = onward;
-      cur = neighborOf(cur.x, cur.y, dir);
-    }
-    const k = maze.index(cur.x, cur.y);
-    if (!seen.has(k)) {
-      seen.add(k);
-      out.push(cur);
+  const own = m.t > 0 ? [m.tile, m.nextTile] : [m.tile];
+  const out: Branch[] = [];
+  for (const p of own) {
+    for (const d of DIR_ORDER) {
+      if (!m.canEnterFrom(p.x, p.y, d)) continue;
+      const start = neighborOf(p.x, p.y, d);
+      if (block.has(maze.index(start.x, start.y))) continue;
+      out.push({ start, field: maze.field([start], false, block) });
     }
   }
   return out;
+}
+
+/**
+ * FLANK: close in on him from every side at once. Each dangerous ghost
+ * already covers the side it's coming from (the player's included); AI
+ * ghosts take the sides nobody covers, routing round him to come in through
+ * that side. Spare ghosts double up on the side they reach soonest. Returns
+ * the ghosts left without a side.
+ */
+function flankPlan(ctx: SimContext, squad: Ghost[], plan: Map<GhostId, Spot>): Ghost[] {
+  const { maze } = ctx;
+  const m = ctx.pac.mover;
+  const block = new Set((m.t > 0 ? [m.tile, m.nextTile] : [m.tile]).map((p) => maze.index(p.x, p.y)));
+  ctx.pacBlock = block;
+  const branches = pacBranches(ctx, block);
+  if (!branches.length) return squad;
+
+  const sideOf = (g: Ghost): number => {
+    const i = maze.index(g.mover.tx, g.mover.ty);
+    let best = -1;
+    let bestD = Infinity;
+    branches.forEach((b, k) => {
+      const v = b.field[i];
+      if (v >= 0 && v < bestD) {
+        bestD = v;
+        best = k;
+      }
+    });
+    return best;
+  };
+
+  const covered = new Set<number>();
+  for (const g of ctx.ghosts) {
+    if (g.isPlayer && g.state === 'normal') covered.add(sideOf(g));
+  }
+  const side = new Map(squad.map((g) => [g.id, sideOf(g)]));
+  // Tiles from each ghost to each side's way in, going round him.
+  const cost = new Map(
+    squad.map((g) => {
+      const around = maze.field([g.mover.tile], false, block);
+      return [g.id, branches.map((b) => around[maze.index(b.start.x, b.start.y)])] as const;
+    }),
+  );
+
+  let left = squad;
+  for (let round = 0; left.length && round < 2; round++) {
+    const open = branches.map((_, k) => k).filter((k) => round > 0 || !covered.has(k));
+    while (left.length && open.length) {
+      let pick: { g: Ghost; k: number; c: number } | null = null;
+      for (const g of left) {
+        for (const k of open) {
+          const v = (cost.get(g.id) as number[])[k];
+          if (v >= 0 && (!pick || v < pick.c)) pick = { g, k, c: v };
+        }
+      }
+      if (!pick) break;
+      const { g, k } = pick;
+      // Already on that side: straight at him. Otherwise round to it.
+      plan.set(g.id, side.get(g.id) === k ? m.tile : { ...branches[k].start, around: true });
+      open.splice(open.indexOf(k), 1);
+      left = left.filter((x) => x !== g);
+    }
+  }
+  return left;
 }
 
 /** Hand out distinct spots, cheapest ghost-spot pair first. */
@@ -146,7 +214,7 @@ function assignSpots(
   squad: Ghost[],
   spots: TilePos[],
   cost: (g: Ghost, p: TilePos) => number,
-  plan: Map<GhostId, TilePos>,
+  plan: Map<GhostId, Spot>,
 ): Ghost[] {
   const free = new Set(spots.map((_, i) => i));
   let left = [...squad];
@@ -167,9 +235,9 @@ function assignSpots(
 }
 
 /** Targets for this frame's stance; ghosts left without a spot pursue him directly. */
-function squadPlan(ctx: SimContext): Map<GhostId, TilePos> {
+function squadPlan(ctx: SimContext): Map<GhostId, Spot> {
   if (ctx.plan) return ctx.plan;
-  const plan = new Map<GhostId, TilePos>();
+  const plan = new Map<GhostId, Spot>();
   ctx.plan = plan;
   const { maze } = ctx;
   const squad = ctx.ghosts.filter((g) => !g.isPlayer && g.state === 'normal');
@@ -221,8 +289,7 @@ function squadPlan(ctx: SimContext): Map<GhostId, TilePos> {
       }
     }
   } else if (stance === 'flank') {
-    // Seal his exits: one ghost per way out, whoever gets there soonest.
-    rest = assignSpots(squad, escapePoints(ctx), reach, plan);
+    rest = flankPlan(ctx, squad, plan);
   } else if (stance === 'guard') {
     // One ghost per remaining power pellet, nearest first.
     rest = assignSpots(squad, maze.powerTiles(), reach, plan);
@@ -801,7 +868,7 @@ export class Ghost {
     }
   }
 
-  private targetFor(ctx: SimContext): TilePos {
+  private targetFor(ctx: SimContext): Spot {
     if (this.state === 'leaving') return HOUSE_DOOR;
     if (this.state === 'eaten') return HOUSE_CENTER;
 
@@ -837,7 +904,7 @@ export class Ghost {
    * heading into), like Pac-Man; judging from the tile it's leaving made every
    * ghost overshoot junctions and zig-zag.
    */
-  private chooseDir(ctx: SimContext, target: TilePos): void {
+  private chooseDir(ctx: SimContext, target: Spot): void {
     const m = this.mover;
     const at = m.nextTile;
     const back = OPPOSITE[m.dir];
@@ -878,7 +945,8 @@ export class Ghost {
       return;
     }
 
-    const field = ctx.nav.to(target, m.ghostPass);
+    const field =
+      target.around && ctx.pacBlock ? ctx.nav.around(target, ctx.pacBlock) : ctx.nav.to(target, m.ghostPass);
     let best = opts[0];
     let bestD = Infinity;
     for (const d of opts) {
