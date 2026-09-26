@@ -52,16 +52,20 @@ export const SPEED = {
   pacPowered: 10.4,
   pacFury: 11.4, // powered and closing in on his prey
   ghost: 8.0,
-  // A powered Pac-Man closes ~18 tiles over FRIGHT_TIME, less than the
-  // maze's median path distance of 20. At 5.2 he closed 39+ (anywhere was
-  // in reach); at 7.0, ~25 still caught most players.
-  ghostFright: 8.0,
   ghostEaten: 15.0,
   playerGhost: 8.6,
 };
 
 /** Ghosts slow to this fraction of their speed in the side tunnel. */
 export const TUNNEL_SLOW = 0.55;
+
+/**
+ * Frightened ghosts run at this fraction of their own normal speed (8.34
+ * tiles/s for the player's ghost). A powered Pac-Man then closes ~15 tiles
+ * over FRIGHT_TIME, under the maze's median path distance of 20. A flat 5.2
+ * let him close 39+ (anywhere was in reach); a flat 8.0, ~18.
+ */
+export const FRIGHT_SLOW = 0.97;
 
 export const FRIGHT_TIME = 7.5;
 export const FRIGHT_FLASH = 2.2;

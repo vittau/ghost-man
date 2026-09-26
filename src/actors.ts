@@ -1,5 +1,6 @@
 import {
   COLS,
+  FRIGHT_SLOW,
   FRIGHT_TIME,
   GHOSTS,
   HOUSE_CENTER,
@@ -746,11 +747,14 @@ export class Ghost {
   /** Open-corridor speed right now (dash included), for Pac-Man's threat model. */
   cruiseSpeed(level: number): number {
     if (this.state === 'leaving') return SPEED.ghost * 0.8;
-    const base = this.isPlayer ? SPEED.playerGhost : SPEED.ghost * levelSpeedUp(level);
-    return base * (this.dashTimer > 0 ? DASH_BOOST : 1);
+    return this.baseSpeed(level) * (this.dashTimer > 0 ? DASH_BOOST : 1);
   }
 
-  private speedFor(): number {
+  private baseSpeed(level: number): number {
+    return this.isPlayer ? SPEED.playerGhost : SPEED.ghost * levelSpeedUp(level);
+  }
+
+  private speedFor(level: number): number {
     const m = this.mover;
     const tunnel = isTunnel(m.tx, m.ty) ? TUNNEL_SLOW : 1;
     switch (this.state) {
@@ -761,7 +765,7 @@ export class Ghost {
       case 'eaten':
         return SPEED.ghostEaten;
       case 'frightened':
-        return SPEED.ghostFright * tunnel;
+        return this.baseSpeed(level) * FRIGHT_SLOW * tunnel;
       default:
         return (this.isPlayer ? SPEED.playerGhost : m.speed) * tunnel * (this.dashTimer > 0 ? DASH_BOOST : 1);
     }
@@ -906,7 +910,7 @@ export class Ghost {
       this.chooseDir(ctx, this.lastTarget);
     }
 
-    this.mover.speed = this.speedFor();
+    this.mover.speed = this.speedFor(ctx.level);
     this.mover.update(dt);
 
     // Level-appropriate speed for AI ghosts.
