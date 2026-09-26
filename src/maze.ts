@@ -16,6 +16,11 @@ const STEPS = [
   [1, 0],
 ] as const;
 
+// Scratch buffers shared by the flood fills (none of them re-enters another).
+const bfsQueue = new Int32Array(COLS * ROWS);
+const heapKeys: number[] = [];
+const heapTiles: number[] = [];
+
 /**
  * Static maze geometry plus the mutable pellet layer.
  *
@@ -42,6 +47,13 @@ export class Maze {
   tunnelRows: number[] = [];
   level!: LevelDef;
   pacStart: TilePos = { x: 0, y: 0 };
+  /** Bumped whenever the geometry changes (a new maze): cached fields go stale. */
+  geometryVersion = 0;
+  /** Bumped whenever a pellet is eaten or put back: pellet fields go stale. */
+  dotsVersion = 0;
+  private powerCache: TilePos[] = [];
+  private powerCacheVersion = -1;
+  private readonly openCache = new Map<number, TilePos>();
 
   constructor(level: LevelDef = LEVELS[0]) {
     const n = COLS * ROWS;
@@ -77,6 +89,8 @@ export class Maze {
     this.outside = Uint8Array.from(out, (d) => (d >= 0 ? 1 : 0));
     this.findTunnels();
     this.baseDots = this.dots.slice();
+    this.openCache.clear();
+    this.geometryVersion++;
     this.recount();
   }
 
@@ -120,12 +134,7 @@ export class Maze {
       const i = queue.pop() as number;
       const c = i % COLS;
       const r = (i / COLS) | 0;
-      for (const [dc, dr] of [
-        [0, -1],
-        [0, 1],
-        [-1, 0],
-        [1, 0],
-      ] as const) {
+      for (const [dc, dr] of STEPS) {
         const nr = r + dr;
         if (nr < 0 || nr >= ROWS) continue;
         const nc = this.wrapCol(c + dc);
@@ -158,6 +167,7 @@ export class Maze {
       else if (this.dots[i] === 2) power++;
     }
     this.respawns = [];
+    this.dotsVersion++;
     this.dotsLeft = dots;
     this.dotsTotal = dots;
     this.powerLeft = power;
@@ -201,6 +211,11 @@ export class Maze {
     const cx = Math.max(0, Math.min(COLS - 1, t.x));
     const cy = Math.max(0, Math.min(ROWS - 1, t.y));
     if (this.outside[idx(cx, cy)]) return { x: cx, y: cy };
+    // The full scan below only depends on the target and the geometry, and
+    // off-board targets (Pinky's, Inky's) recur frame after frame.
+    const key = (t.x + 1024) * 2048 + (t.y + 1024);
+    const hit = this.openCache.get(key);
+    if (hit) return { x: hit.x, y: hit.y };
     let best: TilePos = { x: cx, y: cy };
     let bd = Infinity;
     for (let i = 0; i < this.kind.length; i++) {
@@ -213,7 +228,9 @@ export class Maze {
         best = { x, y };
       }
     }
-    return best;
+    if (this.openCache.size > 4096) this.openCache.clear();
+    this.openCache.set(key, best);
+    return { x: best.x, y: best.y };
   }
 
   /** 0 = nothing, 1 = dot, 2 = power pellet. */
@@ -226,6 +243,7 @@ export class Maze {
       this.powerLeft--;
       this.respawns.push({ x: c, y: r, t: POWER_RESPAWN });
     }
+    if (v !== 0) this.dotsVersion++;
     this.dots[i] = 0;
     return v;
   }
@@ -242,18 +260,22 @@ export class Maze {
       if (p.t > 0 || (p.x === pac.x && p.y === pac.y)) return true;
       this.dots[idx(p.x, p.y)] = 2;
       this.powerLeft++;
+      this.dotsVersion++;
       back.push({ x: p.x, y: p.y });
       return false;
     });
     return back;
   }
 
-  /** All remaining power pellet tiles. */
-  powerTiles(): TilePos[] {
+  /** All remaining power pellet tiles (shared until the pellets change: don't mutate). */
+  powerTiles(): readonly TilePos[] {
+    if (this.powerCacheVersion === this.dotsVersion) return this.powerCache;
     const out: TilePos[] = [];
     for (let i = 0; i < this.dots.length; i++) {
       if (this.dots[i] === 2) out.push({ x: i % COLS, y: (i / COLS) | 0 });
     }
+    this.powerCache = out;
+    this.powerCacheVersion = this.dotsVersion;
     return out;
   }
 
@@ -270,10 +292,10 @@ export class Maze {
    * Sources that land inside a wall are snapped to adjacent floor. Tiles in
    * `blocked` (by index) are treated as walls, sources included.
    */
-  field(targets: TilePos[], ghostPass = false, blocked?: ReadonlySet<number>): Int32Array {
+  field(targets: readonly TilePos[], ghostPass = false, blocked?: ReadonlySet<number>): Int32Array {
     const n = COLS * ROWS;
     const dist = new Int32Array(n).fill(-1);
-    const queue = new Int32Array(n);
+    const queue = bfsQueue;
     let head = 0;
     let tail = 0;
 
@@ -299,12 +321,7 @@ export class Maze {
         seed(i);
       } else {
         // Snap a blocked target to whichever neighbours are floor.
-        for (const [dc, dr] of [
-          [0, -1],
-          [0, 1],
-          [-1, 0],
-          [1, 0],
-        ] as const) {
+        for (const [dc, dr] of STEPS) {
           const nr = r + dr;
           if (nr < 0 || nr >= ROWS) continue;
           const ni = idx(this.wrapCol(c + dc), nr);
@@ -318,12 +335,7 @@ export class Maze {
       const c = i % COLS;
       const r = (i / COLS) | 0;
       const d = dist[i] + 1;
-      for (const [dc, dr] of [
-        [0, -1],
-        [0, 1],
-        [-1, 0],
-        [1, 0],
-      ] as const) {
+      for (const [dc, dr] of STEPS) {
         const nr = r + dr;
         if (nr < 0 || nr >= ROWS) continue;
         const ni = idx(this.wrapCol(c + dc), nr);
@@ -347,16 +359,19 @@ export class Maze {
     speed: number,
     tunnelFactor: number,
     ghostPass = false,
+    out?: Float32Array,
   ): Float32Array {
-    const time = new Float32Array(COLS * ROWS).fill(-1);
+    const time = (out ?? new Float32Array(COLS * ROWS)).fill(-1);
     const passable = (i: number): boolean => {
       const k = this.kind[i];
       return k === FLOOR || (k === DOOR && ghostPass);
     };
 
     // Binary min-heap of (key, tile) with lazy deletion.
-    const hk: number[] = [];
-    const hv: number[] = [];
+    const hk = heapKeys;
+    const hv = heapTiles;
+    hk.length = 0;
+    hv.length = 0;
     const push = (k: number, v: number): void => {
       let i = hk.length;
       hk.push(k);
@@ -425,38 +440,54 @@ export class Maze {
   }
 }
 
-/** Per-frame memoisation of BFS fields so ghosts can share paths. */
+/**
+ * Memoised BFS fields so ghosts can share paths. A field depends only on the
+ * maze geometry and its target (plus the walled-off tiles for `around`), so
+ * entries live across frames until the maze changes. Fields are shared: never
+ * write into one.
+ */
 export class NavCache {
-  private cache = new Map<string, Int32Array>();
+  private cache = new Map<number, Int32Array>();
+  private aroundCache = new Map<string, Int32Array>();
+  private version = -1;
 
   constructor(private readonly maze: Maze) {}
 
   clear(): void {
     this.cache.clear();
+    this.aroundCache.clear();
+  }
+
+  /** Drop everything when the maze has changed since the last lookup. */
+  private sync(): void {
+    if (this.version === this.maze.geometryVersion) return;
+    this.version = this.maze.geometryVersion;
+    this.clear();
   }
 
   to(target: TilePos, ghostPass: boolean): Int32Array {
-    const key = `${target.x},${target.y},${ghostPass ? 1 : 0}`;
+    this.sync();
+    const key = ((target.x + 1024) * 2048 + (target.y + 1024)) * 2 + (ghostPass ? 1 : 0);
     let f = this.cache.get(key);
     if (!f) {
       f = this.maze.field([target], ghostPass);
+      if (this.cache.size > 2048) this.cache.clear();
       this.cache.set(key, f);
     }
     return f;
   }
 
-  /** Like `to`, but with the `blocked` tiles walled off (cleared each frame). */
+  /** Like `to`, but with the `blocked` tiles walled off. */
   around(target: TilePos, blocked: ReadonlySet<number>): Int32Array {
-    const key = `${target.x},${target.y},around`;
-    let f = this.cache.get(key);
+    this.sync();
+    let key = `${target.x},${target.y}`;
+    for (const i of blocked) key += `,${i}`;
+    let f = this.aroundCache.get(key);
     if (!f) {
       f = this.maze.field([target], false, blocked);
-      this.cache.set(key, f);
+      if (this.aroundCache.size > 256) this.aroundCache.clear();
+      this.aroundCache.set(key, f);
     }
     return f;
-  }
-
-  from(targets: TilePos[], ghostPass: boolean): Int32Array {
-    return this.maze.field(targets, ghostPass);
   }
 }

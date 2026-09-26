@@ -132,6 +132,7 @@ export class Menu {
 
   private readonly sky = new Graphics();
   private readonly stars = new Graphics();
+  private readonly sunHalo = new Graphics();
   private readonly sun = new Graphics();
   private readonly mountains = new Graphics();
   private readonly floor = new Graphics();
@@ -172,11 +173,13 @@ export class Menu {
   /** Sun gradient, cached per disc geometry: a FillGradient owns a texture. */
   private sunGrad: FillGradient | null = null;
   private sunGradKey = '';
+  /** Selection the ghost cards were last drawn for (-1: redraw). */
+  private boxesFor = -1;
 
   constructor() {
     this.bgLayer.eventMode = 'none';
     this.uiLayer.eventMode = 'none';
-    this.bgLayer.addChild(this.sky, this.stars, this.sun, this.mountains, this.floor);
+    this.bgLayer.addChild(this.sky, this.stars, this.sunHalo, this.sun, this.mountains, this.floor);
 
     // Frosted glass behind the title and the side panel, so the text reads
     // cleanly over the busy demo. Optional: without it the tinted scrims
@@ -337,6 +340,12 @@ export class Menu {
     this.tipsText.position.set(cx, 610);
     this.audioText.position.set(cx, 676);
     this.credit.position.set(cx, 704);
+
+    // The static backdrop only changes with the width.
+    this.drawSky();
+    this.drawSunHalo();
+    this.drawMountains();
+    this.boxesFor = -1;
   }
 
   update(
@@ -350,10 +359,8 @@ export class Menu {
   ): void {
     this.t += dt;
 
-    this.drawSky();
     this.drawStars(dt);
     this.drawSun();
-    this.drawMountains();
     this.drawFloor();
 
     this.prompt.alpha = 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(this.t * 4));
@@ -369,35 +376,15 @@ export class Menu {
     this.audioText.text = muted ? `SOUND MUTED · ${device === 'gamepad' ? 'VIEW' : 'N'}` : audioHint;
 
     const panelX = SCREEN_W - HUD_W;
+    const redrawBoxes = this.boxesFor !== selected;
+    this.boxesFor = selected;
     this.rows.forEach((row, i) => {
       const active = i === selected;
       const w = HUD_W - 40;
       const x = panelX + 20;
       const y = ROW_Y[i];
 
-      row.box.clear();
-      row.box.roundRect(x, y, w, ROW_H, 8).fill({
-        color: active ? PALETTE.wallFill : 0x120a26,
-        alpha: active ? 0.95 : 0.5,
-      });
-      if (active) {
-        // A wash of the ghost's colour from the left, like a lit arcade marquee.
-        for (let k = 0; k < 6; k++) {
-          row.box.roundRect(x, y, w * (0.2 + k * 0.12), ROW_H, 8).fill({ color: row.def.color, alpha: 0.03 });
-        }
-      }
-      row.box.roundRect(x, y, w, ROW_H, 8).stroke({
-        width: active ? 2 : 1,
-        color: active ? row.def.color : PALETTE.wallDim,
-        alpha: active ? 1 : 0.55,
-      });
-      if (active) {
-        row.box.roundRect(x - 4, y - 4, w + 8, ROW_H + 8, 10).stroke({
-          width: 1,
-          color: PALETTE.accent2,
-          alpha: 0.5,
-        });
-      }
+      if (redrawBoxes) this.drawBox(row, active, x, y, w);
 
       row.ghost.clear();
       const pulse = active ? 1 + Math.sin(this.t * 5) * 0.05 : 1;
@@ -410,6 +397,33 @@ export class Menu {
       row.ability.alpha = active ? 1 : 0.7;
       row.desc.alpha = active ? 0.95 : 0.6;
     });
+  }
+
+  /** A ghost's card in the panel; redrawn only when the selection moves. */
+  private drawBox(row: Row, active: boolean, x: number, y: number, w: number): void {
+    row.box.clear();
+    row.box.roundRect(x, y, w, ROW_H, 8).fill({
+      color: active ? PALETTE.wallFill : 0x120a26,
+      alpha: active ? 0.95 : 0.5,
+    });
+    if (active) {
+      // A wash of the ghost's colour from the left, like a lit arcade marquee.
+      for (let k = 0; k < 6; k++) {
+        row.box.roundRect(x, y, w * (0.2 + k * 0.12), ROW_H, 8).fill({ color: row.def.color, alpha: 0.03 });
+      }
+    }
+    row.box.roundRect(x, y, w, ROW_H, 8).stroke({
+      width: active ? 2 : 1,
+      color: active ? row.def.color : PALETTE.wallDim,
+      alpha: active ? 1 : 0.55,
+    });
+    if (active) {
+      row.box.roundRect(x - 4, y - 4, w + 8, ROW_H + 8, 10).stroke({
+        width: 1,
+        color: PALETTE.accent2,
+        alpha: 0.5,
+      });
+    }
   }
 
   private drawSky(): void {
@@ -459,6 +473,18 @@ export class Menu {
     }
   }
 
+  /** The warm haze the sun sits in (static: drawn on layout). */
+  private drawSunHalo(): void {
+    const g = this.sunHalo;
+    g.clear();
+    const cx = VIEW_W / 2;
+    const R = Math.min(190, VIEW_W * 0.2);
+    const cy = HORIZON - R * 0.38;
+    for (let i = 5; i >= 1; i--) {
+      g.circle(cx, cy, R * (1 + i * 0.16)).fill({ color: PALETTE.sunMid, alpha: 0.025 + (5 - i) * 0.006 });
+    }
+  }
+
   /** The vaporwave sunset: gradient disc whose lower half is sliced by drifting bands. */
   private drawSun(): void {
     const g = this.sun;
@@ -466,11 +492,6 @@ export class Menu {
     const cx = VIEW_W / 2;
     const R = Math.min(190, VIEW_W * 0.2);
     const cy = HORIZON - R * 0.38;
-
-    // Halo first, so the disc sits in a warm haze.
-    for (let i = 5; i >= 1; i--) {
-      g.circle(cx, cy, R * (1 + i * 0.16)).fill({ color: PALETTE.sunMid, alpha: 0.025 + (5 - i) * 0.006 });
-    }
 
     // Each solid slice is an exact circle segment with sub-pixel edges, all
     // filled from one disc-wide gradient, so the bands glide instead of

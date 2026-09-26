@@ -126,6 +126,9 @@ export class Hud {
   private readonly frightBar = new Graphics();
 
   private panelX = 0;
+  /** What the ghost card and the life icons were last drawn for ('' = redraw). */
+  private cardKey = '';
+  private livesKey = '';
   private abilityGlowAt = -Infinity;
   private cx = 0;
   private cw = 0;
@@ -265,6 +268,8 @@ export class Hud {
       .roundRect(VIEW_W / 2 - cardW / 2, cardTop, cardW, cardBottom - cardTop, 12)
       .fill({ color: PALETTE.bgDeep, alpha: 0.88 })
       .stroke({ width: 1.5, color: PALETTE.accent2, alpha: 0.55 });
+    this.cardKey = '';
+    this.livesKey = '';
   }
 
   /** Light up the ability meter: it just became usable again. */
@@ -278,11 +283,14 @@ export class Hud {
   }
 
   update(s: HudState): void {
+    this.fpsLayer.visible = s.showFps;
+    this.fpsText.text = `${Math.round(s.fps)} FPS`;
+    // Hidden on the title screen: nothing else to draw.
+    if (!this.layer.visible) return;
+
     this.scoreValue.text = String(s.score).padStart(6, '0');
     this.highValue.text = String(s.high).padStart(6, '0');
     this.levelValue.text = String(s.level);
-    this.fpsLayer.visible = s.showFps;
-    this.fpsText.text = `${Math.round(s.fps)} FPS`;
     this.abilityValue.text = s.abilityName;
     this.abilityValue.style.fill = s.abilityReady ? PALETTE.gold : PALETTE.textDim;
     this.abilityValue.scale.set(1 + 0.18 * this.abilityGlow());
@@ -386,6 +394,14 @@ export class Hud {
 
   /** Decorative identity card: who you are, not where anything is. */
   private drawGhostCard(s: HudState): void {
+    // The ghost is drawn once per colour and pulses by scale; its geometry is
+    // all proportional to the radius, so that matches a redraw at 30 * pulse.
+    const pulse = 1 + Math.sin(Date.now() / 260) * 0.04;
+    this.bigGhost.scale.set(pulse);
+    const key = `${s.playerColor}`;
+    if (key === this.cardKey) return;
+    this.cardKey = key;
+
     const x = this.panelX + 20;
     const w = HUD_W - 40;
 
@@ -398,8 +414,7 @@ export class Hud {
     });
 
     this.bigGhost.clear();
-    const pulse = 1 + Math.sin(Date.now() / 260) * 0.04;
-    drawGhost(this.bigGhost, 30 * pulse, {
+    drawGhost(this.bigGhost, 30, {
       color: s.playerColor,
       dir: 'left',
       wave: 0,
@@ -407,6 +422,9 @@ export class Hud {
   }
 
   private drawLives(s: HudState): void {
+    const key = `${s.lives},${s.pacLives},${s.playerColor}`;
+    if (key === this.livesKey) return;
+    this.livesKey = key;
     this.lifeIcons.forEach((v, i) => {
       const on = i < s.lives;
       v.visible = on;

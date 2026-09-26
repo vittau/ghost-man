@@ -90,6 +90,7 @@ async function boot(): Promise<void> {
   let accMs = 0;
   let frames = 0;
   let fpsReports = 3;
+  let cursor = '';
 
   const fit = (): void => {
     setViewportWidth(widthForWindow());
@@ -116,7 +117,8 @@ async function boot(): Promise<void> {
     input.poll();
     game.update(dt, input);
     // No stray pointer over the maze while playing on a controller.
-    app.canvas.style.cursor = input.lastDevice === 'gamepad' ? 'none' : '';
+    const wantCursor = input.lastDevice === 'gamepad' ? 'none' : '';
+    if (wantCursor !== cursor) app.canvas.style.cursor = cursor = wantCursor;
 
     // The first few frame-rate samples go to the desktop shell's launch log.
     // (There is no automatic quality drop: its sub-1 render resolution broke

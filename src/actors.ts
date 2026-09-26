@@ -132,7 +132,7 @@ interface Branch {
  * tile is on: the branch it reaches him through soonest.
  */
 function pacBranches(ctx: SimContext, block: ReadonlySet<number>): Branch[] {
-  const { maze } = ctx;
+  const { maze, nav } = ctx;
   const m = ctx.pac.mover;
   const own = m.t > 0 ? [m.tile, m.nextTile] : [m.tile];
   const out: Branch[] = [];
@@ -141,7 +141,7 @@ function pacBranches(ctx: SimContext, block: ReadonlySet<number>): Branch[] {
       if (!m.canEnterFrom(p.x, p.y, d)) continue;
       const start = neighborOf(p.x, p.y, d);
       if (block.has(maze.index(start.x, start.y))) continue;
-      out.push({ start, field: maze.field([start], false, block) });
+      out.push({ start, field: nav.around(start, block) });
     }
   }
   return out;
@@ -184,7 +184,7 @@ function flankPlan(ctx: SimContext, squad: Ghost[], plan: Map<GhostId, Spot>): G
   // Tiles from each ghost to each side's way in, going round him.
   const cost = new Map(
     squad.map((g) => {
-      const around = maze.field([g.mover.tile], false, block);
+      const around = ctx.nav.around(g.mover.tile, block);
       return [g.id, branches.map((b) => around[maze.index(b.start.x, b.start.y)])] as const;
     }),
   );
@@ -247,7 +247,7 @@ function squadPlan(ctx: SimContext): Map<GhostId, Spot> {
   const { maze } = ctx;
   const squad = ctx.ghosts.filter((g) => !g.isPlayer && g.state === 'normal');
   if (!squad.length) return plan;
-  const reachField = new Map(squad.map((g) => [g.id, maze.field([g.mover.tile], false)]));
+  const reachField = new Map(squad.map((g) => [g.id, ctx.nav.to(g.mover.tile, false)]));
   const reach = (g: Ghost, p: TilePos): number => {
     const v = (reachField.get(g.id) as Int32Array)[maze.index(p.x, p.y)];
     return v < 0 ? Infinity : v;
@@ -315,6 +315,9 @@ const levelSpeedUp = (level: number): number => Math.min(1.35, 1 + (level - 1) *
  * reads a dashing Blinky as the threat it is; the tunnel slowdown is priced in,
  * which is what makes the side portals a real escape route.
  */
+/** Scratch for one ghost's travel-time field, merged straight into the result. */
+const travelScratch = new Float32Array(COLS * ROWS);
+
 export function threatField(maze: Maze, ghosts: Ghost[], level: number): Float32Array {
   const out = new Float32Array(COLS * ROWS).fill(-1);
   for (const g of ghosts) {
@@ -331,7 +334,7 @@ export function threatField(maze: Maze, ghosts: Ghost[], level: number): Float32
       const n = m.nextTile;
       seeds.push({ x: n.x, y: n.y, t: delay + (1 - m.t) / speed });
     }
-    const f = maze.travelTime(seeds, speed, TUNNEL_SLOW, g.state === 'leaving');
+    const f = maze.travelTime(seeds, speed, TUNNEL_SLOW, g.state === 'leaving', travelScratch);
     for (let i = 0; i < out.length; i++) {
       if (f[i] >= 0 && (out[i] < 0 || f[i] < out[i])) out[i] = f[i];
     }
@@ -506,7 +509,7 @@ export class Pacman {
    */
   private huntGoals(ctx: SimContext): Set<number> | null {
     const { maze } = ctx;
-    const from = maze.field([this.mover.nextTile], false);
+    const from = ctx.nav.to(this.mover.nextTile, false);
     const distTo = (g: Ghost): number => fieldAt(maze, from, g.mover.tx, g.mover.ty);
     // The tile nearest to where the ghost actually is. Aiming at where it's
     // heading breaks head-on (that's the tile Pac-Man is leaving, so he'd turn

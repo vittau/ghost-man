@@ -2,9 +2,12 @@ import { BloomFilter, CRTFilter } from 'pixi-filters';
 import type { Filter } from 'pixi.js';
 import { CrtGeomFilter } from './crt-filter';
 
-/** Soft neon bloom applied to the whole play field. */
+/**
+ * Soft neon bloom applied to the whole play field. Quality 3 looks the same
+ * as 5 at this strength, with two fewer blur passes per axis.
+ */
 export function createBloom(): BloomFilter {
-  return new BloomFilter({ strength: 2.2, quality: 5, kernelSize: 9 });
+  return new BloomFilter({ strength: 2.2, quality: 3, kernelSize: 9 });
 }
 
 export interface CrtResult {

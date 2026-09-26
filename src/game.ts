@@ -64,6 +64,21 @@ const DEMO_FOCUS_TIME = 5;
 const WALL_DOTS_HZ = 20;
 /** Motion-trail sampling interval (see drawTrails). */
 const TRAIL_STEP = 1 / 60;
+/** Trail points kept per actor, and the ghost silhouettes drawn from them. */
+const TRAIL_LEN = 10;
+const TRAIL_SHAPES = TRAIL_LEN / 2;
+/** Ghost body radius, in world pixels. */
+const GHOST_R = TILE * 0.45;
+
+/**
+ * One ghost's trail: silhouettes sharing a single pre-built shape (moved,
+ * scaled and tinted per point instead of re-tessellated every frame), and the
+ * eyes' dots while it is eaten.
+ */
+interface GhostTrail {
+  shapes: Graphics[];
+  dots: Graphics;
+}
 
 const dirAngle = (d: Dir, fallback: number): number => {
   switch (d) {
@@ -155,6 +170,9 @@ export class Game {
   private readonly doorGfx = new Graphics();
   private readonly portalGfx = new Graphics();
   private readonly trailGfx = new Graphics();
+  private readonly ghostTrails = new Map<GhostId, GhostTrail>();
+  /** Per-tile glint phase for drawSparkles (a pure function of the tile). */
+  private readonly sparkleSeed = Float64Array.from({ length: COLS * ROWS }, (_, i) => lattice(i, 7, 3));
   private readonly actorLayer = new Container();
   private readonly overlayGfx = new Graphics();
   private readonly intentGfx = new Graphics();
@@ -206,7 +224,18 @@ export class Game {
       this.actorLayer.addChild(view);
     }
 
-    this.actorLayer.addChildAt(this.trailGfx, 0);
+    // Trails sit under every actor: each ghost's, then Pac-Man's.
+    const trailLayer = new Container();
+    const silhouette = new Graphics();
+    drawGhostSilhouette(silhouette, 0, 0, GHOST_R, 3, PALETTE.white, 1);
+    for (const def of GHOSTS) {
+      const shapes = Array.from({ length: TRAIL_SHAPES }, () => new Graphics(silhouette.context));
+      const dots = new Graphics();
+      trailLayer.addChild(...shapes, dots);
+      this.ghostTrails.set(def.id, { shapes, dots });
+    }
+    trailLayer.addChild(this.trailGfx);
+    this.actorLayer.addChildAt(trailLayer, 0);
     this.actorLayer.addChild(this.playerRing, this.intentGfx, this.pacView, this.alertView);
     this.world.addChild(
       this.floorGrid,
@@ -502,7 +531,7 @@ export class Game {
     const t = this.elapsed;
     for (let i = 0; i < this.maze.dots.length; i++) {
       if (this.maze.dots[i] !== 1) continue;
-      const h = lattice(i, 7, 3);
+      const h = this.sparkleSeed[i];
       const s = Math.sin(t * (0.5 + h * 0.6) + h * 60);
       if (s < 0.99) continue;
       const k = (s - 0.99) / 0.01;
@@ -804,11 +833,22 @@ export class Game {
     return this.dotTiles;
   }
 
+  /** Pellet distance fields, kept until a pellet is eaten or comes back. */
+  private pelletFields: { version: number; dot: Int32Array | null; power: Int32Array | null } = {
+    version: -1,
+    dot: null,
+    power: null,
+  };
+
   private computeFields(): SimFields {
     const threat = threatField(this.maze, this.ghosts, this.level);
-    const dot = this.maze.dotsLeft > 0 ? this.maze.field(this.dotTilesNow(), false) : null;
-    const power = this.maze.powerLeft > 0 ? this.maze.field(this.maze.powerTiles(), false) : null;
-    return { threat, dot, power };
+    const pf = this.pelletFields;
+    if (pf.version !== this.maze.dotsVersion) {
+      pf.version = this.maze.dotsVersion;
+      pf.dot = this.maze.dotsLeft > 0 ? this.maze.field(this.dotTilesNow(), false) : null;
+      pf.power = this.maze.powerLeft > 0 ? this.maze.field(this.maze.powerTiles(), false) : null;
+    }
+    return { threat, dot: pf.dot, power: pf.power };
   }
 
   private context(fields: SimFields): SimContext {
@@ -826,7 +866,6 @@ export class Game {
   }
 
   private updateSim(dt: number, ctx: SimContext): void {
-    this.nav.clear();
     this.pac.update(dt, ctx);
     for (const g of this.ghosts) {
       if (g.state === 'frightened' || (g.state === 'leaving' && g.frightTimer > 0)) g.frightTimer = this.frightTimer;
@@ -1456,7 +1495,7 @@ export class Game {
     view.clear();
     const frightened = g.state === 'frightened';
     const eaten = g.state === 'eaten';
-    const r = TILE * 0.45;
+    const r = GHOST_R;
     const body = frightened ? PALETTE.frightBody : g.def.color;
     const wave = this.elapsed * SKIRT_RATE + GHOSTS.indexOf(g.def) * 0.37;
     if (!eaten) {
@@ -1489,7 +1528,7 @@ export class Game {
   private drawTrails(dt: number): void {
     const g = this.trailGfx;
     g.clear();
-    const LEN = 10;
+    const LEN = TRAIL_LEN;
     // Sampled at 60 Hz on average whatever the refresh rate, so a trail spans
     // the same time (and length) on a 120 Hz screen as on a 60 Hz one. The 10%
     // slack keeps frame-time jitter at 60 Hz from skipping samples.
@@ -1511,23 +1550,30 @@ export class Game {
       return pts;
     };
 
-    const r = TILE * 0.45;
     for (const gh of this.ghosts) {
       const pts = sample(gh.id, gh.px, gh.py);
-      if (gh.state === 'house') continue;
-      const dashing = gh.dashTimer > 0;
-      const eaten = gh.state === 'eaten';
-      const color = gh.state === 'frightened' ? PALETTE.frightBody : gh.def.color;
-      for (let i = 0; i < pts.length - 1; i += 2) {
-        const k = (i + 1) / pts.length;
-        const p = pts[i];
-        if (eaten) {
-          g.circle(p.x, p.y, 2 + k * 2).fill({ color: PALETTE.eyeWhite, alpha: 0.12 * k });
-        } else {
-          const tint = dashing ? lerpColor(color, PALETTE.white, 0.35) : color;
-          drawGhostSilhouette(g, p.x, p.y, r * (0.8 + 0.2 * k), 3, tint, (dashing ? 0.34 : 0.07) * k);
+      const trail = this.ghostTrails.get(gh.id) as GhostTrail;
+      trail.dots.clear();
+      let used = 0;
+      if (gh.state !== 'house') {
+        const dashing = gh.dashTimer > 0;
+        const eaten = gh.state === 'eaten';
+        const color = gh.state === 'frightened' ? PALETTE.frightBody : gh.def.color;
+        for (let i = 0; i < pts.length - 1; i += 2) {
+          const k = (i + 1) / pts.length;
+          const p = pts[i];
+          if (eaten) {
+            trail.dots.circle(p.x, p.y, 2 + k * 2).fill({ color: PALETTE.eyeWhite, alpha: 0.12 * k });
+          } else {
+            const shape = trail.shapes[used++];
+            shape.position.set(p.x, p.y);
+            shape.scale.set(0.8 + 0.2 * k);
+            shape.tint = dashing ? lerpColor(color, PALETTE.white, 0.35) : color;
+            shape.alpha = (dashing ? 0.34 : 0.07) * k;
+          }
         }
       }
+      for (let i = 0; i < trail.shapes.length; i++) trail.shapes[i].visible = i < used;
     }
 
     const pts = sample('pac', this.pac.px, this.pac.py);
