@@ -140,7 +140,15 @@ second copy in the app's `node_modules`.
   HUD panel is at its 350px minimum there).
 - Most art is redrawn every frame into `Graphics`. Cache anything that owns a
   GPU resource — `FillGradient`s are built once per colour (`bodyGradient()`
-  in `draw.ts`), never per frame.
+  in `draw.ts`), never per frame. Art that only changes with the width goes
+  in `layout()` (menu sky, mountains); art whose inputs rarely change is
+  redrawn only when they do (HUD card and lives, menu cards); repeated
+  identical shapes share one `GraphicsContext` (ghost trails).
+- **Distance fields are cached and shared.** `NavCache` keeps fields across
+  frames until `maze.geometryVersion` changes; the pellet fields and
+  `powerTiles()` live until `maze.dotsVersion` changes. Never write into a
+  returned field or array, and change pellets only through `Maze` (`eat`,
+  `tickRespawns`, `resetDots`) so the version moves.
 - **Mazes are data.** A new level is a `.maze` file in `src/levels/`; levels
   play them in file-name order, then start over. Every maze keeps the classic
   ghost house and its ring of floor (rows 11-17, columns 9-18): the AI's house
@@ -171,6 +179,16 @@ because the CRT filter is GLSL-only. Also test with
 `Emulation.setDeviceMetricsOverride({ deviceScaleFactor: 2 })`: a fractional
 render resolution is what exposes filter-texture sizing bugs (skewed CRT,
 resize freezes).
+
+For changes that must not alter behaviour (refactors, optimisations), run
+the game deterministically and compare it with the previous build (a
+`git worktree` of HEAD served by `vite preview`): seed `Math.random` from
+`Page.addScriptToEvaluateOnNewDocument`, stop `ghostman.app.ticker`, fake
+`Date.now`/`performance.now`, step `game.update(1/60, scriptedInput)`, and
+compare every actor's mover state frame by frame, plus `canvas.toDataURL()`
+taken right after `app.render()`. Time A/B builds interleaved: GPU timings
+from headless Chrome are noisy and carry a fixed sync overhead. On the Deck
+the GPU load is light and the JS frame is about 1 ms.
 
 For the desktop shell, `npm run desktop` and pass `--remote-debugging-port`
 to Electron to drive it the same way. There's no gamepad in CDP; override
