@@ -205,7 +205,7 @@ export const GHOSTS: GhostDef[] = [
     ability: 'warp',
     abilityName: 'WARP',
     abilityDesc: 'Jump to the corridor end',
-    cooldown: 8,
+    cooldown: 6,
     blurb: 'The ambusher. Cuts you off.',
   },
   {
