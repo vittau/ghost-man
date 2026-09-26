@@ -67,6 +67,9 @@ export const TUNNEL_SLOW = 0.55;
 export const FRIGHT_SLOW = 1.0;
 
 export const FRIGHT_TIME = 7.5;
+/** Seconds until an eaten power pellet comes back; its spot blinks for the last POWER_WARN. */
+export const POWER_RESPAWN = 30;
+export const POWER_WARN = 5;
 export const FRIGHT_FLASH = 2.2;
 
 export const PAC_LIVES = 3; // times you must catch Pac-Man to clear a level

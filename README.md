@@ -115,7 +115,9 @@ Pick your ghost on the title screen. The other three follow your orders.
 
 - Catch Pac-Man **three times** to clear a level. Each level brings a new
   maze, and they start over after the last.
-- If Pac-Man clears the maze, it's **game over** on the spot.
+- If Pac-Man eats every pellet, it's **game over** on the spot (power
+  pellets don't count: an eaten one comes back 30 s later, its spot
+  blinking for the last 5).
 - A power pellet turns the tables: Pac-Man hunts, and he goes for *you*
   first. Your ability is locked until you recover.
 - Get eaten and you lose a life, and your eyes float back to the house.

@@ -13,6 +13,7 @@ import {
   PAC_LIVES,
   PALETTE,
   PLAYER_LIVES,
+  POWER_WARN,
   READY_TIME,
   ROWS,
   SCREEN_H,
@@ -948,7 +949,7 @@ export class Game {
 
     const ctx = this.context(this.computeFields());
     this.updateSim(dt, ctx);
-    this.resolveDots();
+    this.resolveDots(dt);
     this.resolveCollisions(true);
 
     if (this.maze.dotsLeft <= 0) {
@@ -1038,7 +1039,7 @@ export class Game {
       this.fx.burst(pg.px, pg.py, pg.def.color, 22, { speed: 200, life: 0.5, size: 3 });
       this.fx.ring(pg.px, pg.py, pg.def.color, TILE * 1.8, 0.35, 2.5);
     }
-    this.resolveDots();
+    this.resolveDots(dt);
     if (this.gameOverPending) return;
     this.resolveCollisions(false);
 
@@ -1084,7 +1085,14 @@ export class Game {
   // Rules
   // -------------------------------------------------------------------------
 
-  private resolveDots(): void {
+  private resolveDots(dt: number): void {
+    // Eaten power pellets come back in time, so camping the last one can't
+    // keep him from ever powering up again.
+    for (const p of this.maze.tickRespawns(dt, this.pac.mover.tile)) {
+      this.dotTiles = null;
+      this.fx.ring(centerOf(p.x), centerOf(p.y), PALETTE.power, TILE * 1.6, 0.5, 2);
+    }
+
     // Pac-Man eats the pellet under his current tile.
     if (!this.pac.alive) return;
     const t = this.pac.mover.tile;
@@ -1358,6 +1366,14 @@ export class Game {
       g.circle(x, y, r).fill(PALETTE.power);
       g.circle(x - r * 0.25, y - r * 0.25, r * 0.45).fill({ color: PALETTE.white, alpha: 0.8 });
       drawSparkle(g, x, y, r * 2.3, PALETTE.white, 0.35 + 0.2 * a, this.elapsed * 0.8);
+    }
+    // A spot about to get its pellet back blinks red, faster in the last seconds.
+    for (const p of this.maze.respawns) {
+      if (p.t > POWER_WARN || Math.floor(p.t * (p.t < 2 ? 8 : 4)) % 2) continue;
+      const x = centerOf(p.x);
+      const y = centerOf(p.y);
+      g.circle(x, y, TILE * 0.2).fill({ color: PALETTE.danger, alpha: 0.7 });
+      g.circle(x, y, TILE * 0.36).stroke({ width: 2, color: PALETTE.danger, alpha: 0.8 });
     }
   }
 

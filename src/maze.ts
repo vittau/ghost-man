@@ -1,4 +1,4 @@
-import { COLS, ROWS } from './config';
+import { COLS, POWER_RESPAWN, ROWS } from './config';
 import { LEVELS } from './levels';
 import type { LevelDef } from './levels';
 import type { TilePos } from './types';
@@ -36,6 +36,8 @@ export class Maze {
   private outside: Uint8Array;
   /** Side-portal corridor tiles, where ghosts slow down and Pac-Man doesn't. */
   private readonly tunnel: Uint8Array;
+  /** Eaten power pellets and the seconds until each comes back. */
+  respawns: Array<{ x: number; y: number; t: number }> = [];
   /** Rows with a wrap-around tunnel. */
   tunnelRows: number[] = [];
   level!: LevelDef;
@@ -143,15 +145,19 @@ export class Maze {
     }
   }
 
-  /** `dotsLeft` counts everything still to eat, power pellets included (as `eat` does). */
+  /**
+   * `dotsLeft` counts the ordinary pellets still to eat: clearing those clears
+   * the maze. Power pellets are counted apart (`powerLeft`); an eaten one comes
+   * back after POWER_RESPAWN, so they can't count toward clearing.
+   */
   private recount(): void {
     let dots = 0;
     let power = 0;
     for (let i = 0; i < this.dots.length; i++) {
-      if (this.dots[i] === 0) continue;
-      dots++;
-      if (this.dots[i] === 2) power++;
+      if (this.dots[i] === 1) dots++;
+      else if (this.dots[i] === 2) power++;
     }
+    this.respawns = [];
     this.dotsLeft = dots;
     this.dotsTotal = dots;
     this.powerLeft = power;
@@ -218,10 +224,28 @@ export class Maze {
     if (v === 1) this.dotsLeft--;
     else if (v === 2) {
       this.powerLeft--;
-      this.dotsLeft--;
+      this.respawns.push({ x: c, y: r, t: POWER_RESPAWN });
     }
     this.dots[i] = 0;
     return v;
+  }
+
+  /**
+   * Count down the eaten power pellets and put back the ones that are due,
+   * unless Pac-Man is standing on the spot (it waits for him to leave).
+   * Returns the tiles that came back.
+   */
+  tickRespawns(dt: number, pac: TilePos): TilePos[] {
+    const back: TilePos[] = [];
+    this.respawns = this.respawns.filter((p) => {
+      p.t -= dt;
+      if (p.t > 0 || (p.x === pac.x && p.y === pac.y)) return true;
+      this.dots[idx(p.x, p.y)] = 2;
+      this.powerLeft++;
+      back.push({ x: p.x, y: p.y });
+      return false;
+    });
+    return back;
   }
 
   /** All remaining power pellet tiles. */
